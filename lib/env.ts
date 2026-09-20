@@ -269,12 +269,27 @@ export function getEnv(): Env {
   if (cached) return cached;
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
-    const issues = parsed.error.issues
-      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-      .join('; ');
-    throw new ConfigError(`Invalid environment configuration: ${issues}`, {
-      issues: parsed.error.issues as unknown as Record<string, unknown>,
-    });
+    /*
+     * One line per failure, variable name first.
+     *
+     * The previous single-line summary sat above a Zod detail dump, so a log tail
+     * (which shows only the last N lines) displayed an array of `[Object]` entries
+     * and nothing identifying the culprit. Each line below is self-contained so it
+     * survives truncation.
+     */
+    const issues = parsed.error.issues.map((issue) => ({
+      variable: issue.path.join('.') || '(root)',
+      problem: issue.message,
+    }));
+    const summary = [
+      'Invalid environment configuration — fix these environment variables:',
+      ...issues.map((entry) => `  ${entry.variable} — ${entry.problem}`),
+      '',
+      'Only DATABASE_URL is required; every other variable has a working default, so deleting the',
+      'offending one is a valid fix. In Vercel, saving a value is not enough — redeploy.',
+    ].join('\n');
+
+    throw new ConfigError(summary, { issues: issues as unknown as Record<string, unknown> });
   }
   cached = parsed.data;
   return cached;
