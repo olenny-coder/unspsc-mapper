@@ -199,6 +199,7 @@ dashboard.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Vitest unit tests (213 tests) |
 | `npx tsx scripts/smoke-offline.ts` | Offline pipeline smoke test (CSV → dedupe → hierarchy → plan → prompt → roll-up) |
+| `npm run db:check` | Read-only readiness report: connectivity, all 9 tables, taxonomy count, storage vs the Neon free tier. Use instead of `psql` |
 | `npm run db:migrate` | Apply `db/migrations/*.sql` to `DATABASE_URL` |
 | `npm run db:seed` | Seed the UNSPSC taxonomy (`-- --limit=5000` for a quick run) |
 | `npm run db:seed:sample` | Seed `samples/suppliers.csv` and run enrich → link → classify → report |
@@ -685,13 +686,39 @@ curl -L "http://localhost:3000/api/export?format=pdf&segment=43&confidenceState=
 | Groq 70B | 1,000 req/day | Parents first (one request per family), 10 suppliers per batch, `llm_usage` daily counter with a configurable reserve, worker stops when the budget is gone. |
 | Groq 8B | 14,400 req/day | Tiered routing sends the long tail of subsidiaries here. |
 | Groq rate | requests/minute | Sliding-window token bucket (`RateLimiter`) shared per process. |
-| Neon | 0.5 GB, 100 CU-h | `search_text` + a GIN index instead of embedding storage; blobs capped at 4 MB with 30-report retention; single-read report aggregation; connection pooling with `max: 1` on Vercel. |
+| Neon | 0.5 GB, 100 CU-h | Taxonomy trimmed to 89 MB by measurement (see below); blobs capped at 4 MB with 30-report retention; single-read report aggregation; connection pooling with `max: 1` on Vercel. |
 | Render | 15-min spin-down | Cheap `/health` + cron-job.org ping, and cron catch-up on wake-up. |
 | CompanyEnrich / Context.dev | 500 credits | Durable Postgres cache; a repeat enrichment of an unchanged supplier costs 0 credits. |
 | Vercel | 100 GB bandwidth | Reports stream; no images; client components fetch only what they render. |
 
 `GET /api/health` reports today's Groq usage per model and the enrichment credits used this
 month, and `/settings` renders the same numbers as progress bars.
+
+### Storage footprint
+
+Measured, not estimated — `npm run db:check` reports it, and it is worth knowing before you fill
+the 0.5 GB Neon free tier:
+
+| Object | Before | After | What changed |
+|---|---|---|---|
+| `unspsc_codes` heap | 148 MB | 80 MB | dropped the denormalised `search_text` column |
+| `unspsc_codes` indexes | 34 MB | 9 MB | dropped two indexes that measured **0 scans** |
+| **Whole database** | **191 MB** | **98 MB** | 38% → 19% of the free tier |
+
+Two of the removed indexes could never have been used, which is the kind of thing that is easy to
+add speculatively and never measure:
+
+- a **GIN `tsvector`** index on `search_text` — candidate retrieval issues `LIKE '%keyword%'`, which
+  a tsvector index cannot serve;
+- a **B-tree** on `commodity` — a leading-wildcard `LIKE` cannot use a B-tree either.
+
+If candidate retrieval ever becomes a measured bottleneck, the correct index is a **trigram** one
+(`CREATE EXTENSION pg_trgm; CREATE INDEX … USING gin (commodity gin_trgm_ops)`), which *can* serve
+leading-wildcard `LIKE`. The schema and migration comments record this so nobody re-adds the wrong
+index.
+
+At 98 MB you have room for roughly **750k more suppliers** inside the free tier.
+
 
 ---
 
@@ -731,9 +758,29 @@ npm run db:seed              # 149,849 codes, ~30-60 s
 4. Verify:
 
 ```bash
-psql "$DATABASE_URL" -c "select count(*) from unspsc_codes;"   # expect 149849
-psql "$DATABASE_URL" -c "select count(*) from app_settings;"   # expect 1
+npm run db:check
 ```
+
+```
+Database readiness
+
+ ok   connection                 PostgreSQL 17
+ ok   schema (9 tables)          all present
+ ok   settings singleton         row id=1 present
+ ok   UNSPSC taxonomy            149,849 codes across 58 segments (v26.0801)
+ ok   known code lookup          43211507 = Desktop computer
+ ok   content (optional)         empty — upload a CSV, or run `npm run db:seed:sample`
+ ok   storage                    96.0 MB used (18.8% of the 0.5 GB Neon free tier)
+
+All checks passed. This database is ready for the app and the worker.
+```
+
+`db:check` is read-only (safe against production) and exits non-zero when a check fails, so it can
+gate a deploy step. It exists because `psql` is not installed by default on Windows or macOS —
+you do **not** need the Postgres client to verify a Neon database.
+
+> On macOS or Linux with `psql` available, `psql "$DATABASE_URL" -c "select count(*) from unspsc_codes;"`
+> works equally well and should return `149849`.
 
 ### Step 3 — Groq (LLM)
 

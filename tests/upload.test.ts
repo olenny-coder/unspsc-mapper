@@ -104,8 +104,12 @@ describe('UNSPSC seed mapping', () => {
     );
     expect(mapped?.code).toBe('43211500');
     expect(mapped?.segmentCode).toBe('43');
-    expect(mapped?.searchText).toContain('computers');
+    expect(mapped?.commodity).toBe('Computers');
     expect(mapped?.version).toBe('v26.0801');
+    // A denormalised `searchText` column used to be produced here; it was removed
+    // because candidate retrieval stopped reading it (it was 68 MB of write-only
+    // cost in the 0.5 GB Neon free tier). Guard against it creeping back.
+    expect(mapped).not.toHaveProperty('searchText');
   });
 
   it('rejects rows without an 8-digit code or commodity name', () => {

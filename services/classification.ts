@@ -154,9 +154,24 @@ export function extractKeywords(text: string | null | undefined, limit = 8): str
 }
 
 /**
- * Retrieve candidate UNSPSC codes whose commodity/description text matches the
- * supplier's industry and description. Grounding the model in real codes is the
- * single biggest accuracy lever available on a free tier.
+ * Retrieve candidate UNSPSC codes for a supplier.
+ *
+ * Grounding the model in real codes is the biggest single accuracy lever on a
+ * free tier, but the retrieval has to be *relevant* or it actively misleads:
+ * ranking "Computer manufacturing" by a generic keyword once returned
+ * `73161510 Chemical or pharmaceutical machinery manufacture services`.
+ *
+ * Three things make this work:
+ *
+ *  1. **Per-keyword row budgets instead of one big OR.** The original version
+ *     built `WHERE k1 OR k2 ... LIMIT n`, so whichever keyword had the most
+ *     matches filled the result set before ranking ran — the ranking never saw
+ *     the discriminating codes. Each keyword is now queried separately with its
+ *     own small limit, so every keyword gets representation.
+ *  2. **Weighted scoring over the whole row.** A match in `commodity` says far
+ *     more than one in `segment` (segments hold thousands of codes).
+ *  3. **Relevance filtering.** A candidate must score above a floor; otherwise it
+ *     is noise and is dropped rather than padding the prompt.
  */
 export async function findCandidateCodes(
   query: { industry?: string | null; description?: string | null; name?: string | null },
@@ -165,52 +180,130 @@ export async function findCandidateCodes(
   const db = options.db ?? getDb();
   const limit = options.limit ?? 20;
 
-  const keywords = extractKeywords([query.industry, query.description].filter(Boolean).join(' '), 6);
-  if (!keywords.length) {
-    const fromName = extractKeywords(query.name, 2);
-    keywords.push(...fromName);
-  }
-  if (!keywords.length) return [];
+  // Prefer a distinguishing name token, then industry, then description.
+  //
+  // More keywords than the original 5 because `industry` is often a NAICS-derived
+  // label that overlaps with taxonomy *category* names ("Industrial supplies
+  // merchant wholesalers") rather than product nouns, while `description` usually
+  // names the actual goods ("valves, fittings, fasteners"). A wider net lets the
+  // scoring pass find the discriminating terms; the query is per-keyword so the
+  // cost scales linearly and stays bounded.
+  const industryKeywords = extractKeywords(query.industry, 4);
+  const descriptionKeywords = extractKeywords(query.description, 4);
+  const nameKeywords = extractKeywords(query.name, 3);
 
-  const conditions: SQL[] = keywords.map((keyword) =>
-    or(
-      ilike(unspscCodes.commodity, `%${keyword}%`),
-      sql`coalesce(${unspscCodes.searchText}, '') like ${`%${keyword}%`}`,
-      sql`coalesce(${unspscCodes.class}, '') like ${`%${keyword}%`}`,
-      sql`coalesce(${unspscCodes.family}, '') like ${`%${keyword}%`}`,
-    )!,
+  const keywords: string[] = [];
+  for (const source of [industryKeywords, nameKeywords, descriptionKeywords]) {
+    for (const keyword of source) {
+      if (!keywords.includes(keyword)) keywords.push(keyword);
+    }
+  }
+  const selected = keywords.slice(0, 8);
+  if (!selected.length) return [];
+
+  /*
+   * Query each keyword separately with a bounded budget, then merge.
+   *
+   * Matching is restricted to the three *name* fields — commodity, class and
+   * family — and deliberately not `description`. Descriptions are free prose up
+   * to ~400 characters and matching them surfaced a lot of noise whose only fix
+   * is fuzzy relevance: "Laptop and desktop computer depot repair service"
+   * (a service) outranked "Desktop computer" (the product) purely because its
+   * description happened to contain the keywords. Name fields are concise and
+   * carry the actual meaning.
+   */
+  const perKeyword = Math.max(15, Math.ceil((limit * 3) / selected.length));
+
+  const batches = await Promise.all(
+    selected.map((keyword) =>
+      db
+        .select({
+          code: unspscCodes.code,
+          commodity: unspscCodes.commodity,
+          segment: unspscCodes.segment,
+          family: unspscCodes.family,
+          className: unspscCodes.class,
+        })
+        .from(unspscCodes)
+        .where(
+          or(
+            ilike(unspscCodes.commodity, `%${keyword}%`),
+            ilike(unspscCodes.class, `%${keyword}%`),
+            ilike(unspscCodes.family, `%${keyword}%`),
+          )!,
+        )
+        .limit(perKeyword),
+    ),
   );
 
-  const rows = await db
-    .select({
-      code: unspscCodes.code,
-      commodity: unspscCodes.commodity,
-      segment: unspscCodes.segment,
-      family: unspscCodes.family,
-      className: unspscCodes.class,
-      descriptions: unspscCodes.description,
-    })
-    .from(unspscCodes)
-    .where(or(...conditions))
-    .limit(limit * 4);
+  // Merge by code so a candidate matched by several keywords is scored once.
+  const merged = new Map<string, CandidateCode>();
+  for (const rows of batches) {
+    for (const row of rows) {
+      if (!merged.has(row.code)) {
+        merged.set(row.code, {
+          code: row.code,
+          commodity: row.commodity,
+          segment: row.segment,
+          family: row.family,
+          className: row.className,
+        });
+      }
+    }
+  }
 
-  // Rank by how many keywords each candidate matches, then by specificity.
-  const scored = rows.map((row) => {
-    const haystack = `${row.commodity} ${row.className ?? ''} ${row.family ?? ''} ${row.segment ?? ''}`.toLowerCase();
-    const score = keywords.reduce((sum, keyword) => (haystack.includes(keyword) ? sum + 1 : sum), 0);
-    return { row, score };
+  const candidates = [...merged.values()];
+  if (!candidates.length) return [];
+
+  /** Field weights: a commodity hit is specific, a segment hit is nearly noise. */
+  const WEIGHTS = { commodity: 10, className: 4, family: 1, segment: 1 } as const;
+
+  const scored = candidates.map((candidate) => {
+    const commodity = candidate.commodity.toLowerCase();
+    const className = (candidate.className ?? '').toLowerCase();
+    const family = (candidate.family ?? '').toLowerCase();
+    const segment = (candidate.segment ?? '').toLowerCase();
+
+    let score = 0;
+    let matchedKeywords = 0;
+    let commodityHits = 0;
+
+    for (const keyword of selected) {
+      let keywordScore = 0;
+      if (commodity.includes(keyword)) keywordScore = Math.max(keywordScore, WEIGHTS.commodity);
+      else if (className.includes(keyword)) keywordScore = Math.max(keywordScore, WEIGHTS.className);
+      else if (family.includes(keyword)) keywordScore = Math.max(keywordScore, WEIGHTS.family);
+      else if (segment.includes(keyword)) keywordScore = Math.max(keywordScore, WEIGHTS.segment);
+
+      if (keywordScore > 0) {
+        score += keywordScore;
+        matchedKeywords += 1;
+        if (commodity.includes(keyword)) commodityHits += 1;
+      }
+    }
+
+    return { candidate, score, matchedKeywords, commodityHits };
   });
 
-  return scored
-    .sort((a, b) => b.score - a.score || a.row.code.localeCompare(b.row.code))
-    .slice(0, limit)
-    .map(({ row }) => ({
-      code: row.code,
-      commodity: row.commodity,
-      segment: row.segment,
-      family: row.family,
-      className: row.className,
-    }));
+  /*
+   * Relevance floor. Require either a commodity-level hit or at least two
+   * distinct keyword matches somewhere — a single hit in a family or segment
+   * name says nothing about what the supplier actually sells. If nothing clears
+   * the floor the pool is returned anyway (sorted by score) so the prompt still
+   * receives real codes rather than an empty list.
+   */
+  const relevant = scored.filter((entry) => entry.commodityHits > 0 || entry.matchedKeywords >= 2);
+  const pool = relevant.length ? relevant : scored;
+
+  pool.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.commodityHits - a.commodityHits ||
+      b.matchedKeywords - a.matchedKeywords ||
+      a.candidate.code.localeCompare(b.candidate.code),
+  );
+
+  return pool.slice(0, limit).map((entry) => entry.candidate);
 }
 
 /** Most recent human corrections, used as few-shot examples (feedback loop). */

@@ -15,7 +15,6 @@ export type UnspscSeedRow = {
   classCode: string;
   commodity: string;
   description: string | null;
-  searchText: string;
   version: string;
 };
 
@@ -64,13 +63,6 @@ export function mapSeedRecord(record: Record<string, unknown>, version = 'v26.08
 
   const { segmentCode, familyCode, classCode } = hierarchyFromCode(code);
 
-  // Denormalised haystack used by candidate retrieval during classification.
-  const searchText = [commodity, className, family, segment, description]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-    .slice(0, 2000);
-
   return {
     code,
     segment,
@@ -81,7 +73,6 @@ export function mapSeedRecord(record: Record<string, unknown>, version = 'v26.08
     classCode,
     commodity,
     description,
-    searchText,
     version,
   };
 }

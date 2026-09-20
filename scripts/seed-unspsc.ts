@@ -152,7 +152,6 @@ async function main(): Promise<void> {
             classCode: sql`excluded.class_code`,
             commodity: sql`excluded.commodity`,
             description: sql`excluded.description`,
-            searchText: sql`excluded.search_text`,
             version: sql`excluded.version`,
           },
         });

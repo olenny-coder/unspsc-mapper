@@ -59,17 +59,27 @@ CREATE TABLE IF NOT EXISTS "unspsc_codes" (
   "class_code" char(6),
   "commodity" text NOT NULL,
   "description" text,
-  "search_text" text,
   "version" text DEFAULT 'v26.0801' NOT NULL,
   "created_at" timestamptz DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "unspsc_codes_segment_code_idx" ON "unspsc_codes" ("segment_code");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "unspsc_codes_family_code_idx" ON "unspsc_codes" ("family_code");
---> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "unspsc_codes_search_text_idx" ON "unspsc_codes" USING gin (to_tsvector('english', coalesce("search_text", '')));
---> statement-breakpoint
+/*
+ * Deliberately NO index on `search_text` or `commodity`.
+ *
+ * Two were tried and removed after measuring:
+ *   - a GIN tsvector index on `search_text` (21 MB): candidate retrieval issues
+ *     `LIKE '%keyword%'`, which a tsvector index cannot serve. `pg_stat_user_indexes`
+ *     showed 0 scans.
+ *   - a B-tree index on `commodity` (11 MB): a leading-wildcard LIKE cannot use a
+ *     B-tree either, so it would also never be scanned.
+ *
+ * Both were pure cost in the 0.5 GB Neon free tier. If candidate retrieval ever
+ * becomes a measured bottleneck, the correct fix is a trigram index
+ * (`CREATE EXTENSION pg_trgm; CREATE INDEX ... USING gin (commodity gin_trgm_ops)`),
+ * which *can* serve leading-wildcard LIKE — not a plain B-tree.
+ */
 
 CREATE TABLE IF NOT EXISTS "classifications" (
   "id" serial PRIMARY KEY,

@@ -103,14 +103,31 @@ export const unspscCodes = pgTable(
     classCode: char('class_code', { length: 6 }),
     commodity: text('commodity').notNull(),
     description: text('description'),
-    /** Lowercased commodity+description text, used for keyword candidate retrieval. */
-    searchText: text('search_text'),
     version: text('version').default('v26.0801').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     segmentIdx: index('unspsc_codes_segment_code_idx').on(table.segmentCode),
-    familyIdx: index('unspsc_codes_family_code_idx').on(table.familyCode),
+    /*
+     * No index on `searchText` or `commodity`.
+     *
+     * A precomputed `search_text` column (68 MB — the single largest object in
+     * the database) was removed once candidate retrieval stopped reading it:
+     * matching is now restricted to the concise name fields, so the column was
+     * write-only cost in the 0.5 GB Neon free tier.
+     *
+     * The indexes that were tried and removed, with measurements:
+     *   - GIN tsvector on search_text (21 MB): 0 scans. `LIKE '%keyword%'` cannot
+     *     use a tsvector index.
+     *   - B-tree on commodity (11 MB): 0 scans. A leading-wildcard LIKE cannot
+     *     use a B-tree either.
+     *
+     * If candidate retrieval ever becomes a measured bottleneck, the correct
+     * index is a trigram one:
+     *   CREATE EXTENSION pg_trgm;
+     *   CREATE INDEX ... USING gin (commodity gin_trgm_ops);
+     * which *can* serve leading-wildcard LIKE.
+     */
   }),
 );
 
