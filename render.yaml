@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# Render blueprint.
+#
+# Deploy with: Render Dashboard -> New -> Blueprint -> pick this repository.
+# The worker runs as a Web Service (not a Background Worker) because the free
+# tier only offers web services with an HTTP port, and we need /health for the
+# cron-job.org keep-alive ping.
+# ---------------------------------------------------------------------------
+services:
+  - type: web
+    name: unspsc-spend-worker
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    rootDir: .
+    buildCommand: npm ci --omit=dev --no-audit --no-fund
+    # `tsx` executes the TypeScript worker directly, resolving the `@/*` path
+    # aliases from tsconfig.json (no separate build step needed).
+    startCommand: npm run worker:start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: NODE_VERSION
+        value: 20.11.1
+      # --- secrets: set these in the Render dashboard (sync: false) ---------
+      - key: DATABASE_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ENRICH_API_KEY
+        sync: false
+      - key: WORKER_SECRET
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+      - key: DASHBOARD_SECRET
+        sync: false
+      - key: ALLOW_UNAUTHENTICATED_DEV
+        value: false
+      # --- defaults (override in the dashboard as needed) -------------------
+      - key: GROQ_MODEL_ACCURATE
+        value: llama-3.3-70b-versatile
+      - key: GROQ_MODEL_BULK
+        value: llama-3.1-8b-instant
+      - key: ENRICH_PROVIDER
+        value: companyenrich
+      - key: SYNC_STALE_DAYS
+        value: 30
+      - key: SYNC_BATCH_SIZE
+        value: 25
+      - key: SYNC_MAX_BATCHES_PER_RUN
+        value: 12
+      - key: CLASSIFY_CONFIDENCE_THRESHOLD
+        value: 0.7
+      - key: LLM_BATCH_SIZE
+        value: 10
+      - key: CRON_SYNC
+        value: 0 3 * * *
+      - key: CRON_REPORT
+        value: 0 6 * * 1
+      - key: WEEKLY_REPORT_ENABLED
+        value: true
+
+# ---------------------------------------------------------------------------
+# Optional: a paid Background Worker with a native cron schedule.
+# Uncomment on a paid plan and drop the cron-job.org keep-alive ping.
+# ---------------------------------------------------------------------------
+#  - type: worker
+#    name: unspsc-spend-worker-cron
+#    runtime: node
+#    plan: starter
+#    region: oregon
+#    branch: main
+#    buildCommand: npm ci --omit=dev --no-audit --no-fund
+#    startCommand: npm run worker:once
+#    schedule: '0 3 * * *'
+#    envVars:
+#      - key: DATABASE_URL
+#        sync: false
+#      - key: GROQ_API_KEY
+#        sync: false

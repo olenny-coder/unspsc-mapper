@@ -1,0 +1,55 @@
+# Transaction-level sample: the raw shape most ERPs/P2P systems export.
+#
+# Upload this through /upload or POST /api/upload. Rows are deduplicated on the
+# supplier name and the `amount` column is aggregated per supplier, so repeated
+# vendors become one supplier row with summed spend.
+#
+# Columns: supplier,amount,date
+supplier,amount,date
+Dell Technologies,412000.00,2024-01-12
+Dell Technologies,338500.00,2024-02-14
+EMC Corporation,84500.50,2024-02-20
+Dell Technologies,499500.00,2024-03-01
+VMware,48250.00,2024-03-06
+VMware,48250.00,2024-04-06
+Grainger,12400.00,2024-01-08
+Grainger,18900.00,2024-02-09
+W.W. Grainger Canada,15000.00,2024-03-26
+Microsoft,275000.00,2024-01-15
+Microsoft,300000.00,2024-02-15
+Microsoft,300000.00,2024-03-15
+LinkedIn,21000.00,2024-03-08
+LinkedIn,21000.00,2024-04-08
+Microsoft Azure,115000.00,2024-03-09
+Microsoft Azure,115000.00,2024-04-09
+FedEx,52000.00,2024-01-20
+FedEx,53000.00,2024-02-20
+FedEx,53000.00,2024-03-10
+FedEx Freight,30500.00,2024-03-11
+FedEx Freight,30500.00,2024-04-11
+Pfizer,205000.00,2024-03-12
+Pfizer,205000.00,2024-04-12
+Google Cloud,156000.00,2024-03-14
+Google Cloud,156000.00,2024-04-14
+Siemens AG,270000.00,2024-03-15
+Siemens AG,270000.00,2024-04-15
+Siemens Healthineers,89000.00,2024-03-16
+Siemens Healthineers,89000.00,2024-04-16
+Mentor Graphics,19750.00,2024-03-17
+Mentor Graphics,19750.00,2024-04-17
+"ACME  CO., LTD",625.00,2024-03-24
+"ACME  CO., LTD",625.00,2024-04-24
+Acme Co,4375.00,2024-03-25
+Acme Co,4375.00,2024-04-25
+Cintas,19250.00,2024-04-03
+Cintas,19250.00,2024-05-03
+Cintas Facility Services,11000.00,2024-06-16
+Cintas Facility Services,11000.00,2024-07-16
+Honeywell,98000.00,2024-04-05
+Honeywell,98000.00,2024-05-05
+Honeywell Building Solutions,36500.00,2024-04-06
+Honeywell Building Solutions,36500.00,2024-05-06
+Amazon Web Services,206000.00,2024-05-12
+Amazon Web Services,206000.00,2024-06-12
+Adobe,71500.00,2024-05-14
+Adobe,71500.00,2024-06-14

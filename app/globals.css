@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /*
+   * Semantic design tokens.
+   *
+   * Every component uses these (bg-background, text-foreground, border-border,
+   * ...) instead of raw palette colours, which is what makes dark mode a
+   * token swap rather than a second set of classes everywhere.
+   *
+   * Light values are the original palette; the `.dark` block below overrides the
+   * same names, so `dark:` variants are only needed for the handful of places
+   * that carry intentional colour (status badges, alerts, charts).
+   */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 72% 42%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 221 72% 42%;
+
+    /* Chart + status accents, kept as tokens so SVG fills can follow the theme. */
+    --chart-grid: 214 32% 91%;
+    --chart-1: 221 72% 50%;
+    --chart-2: 199 89% 48%;
+    --chart-3: 160 84% 39%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 72% 51%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Slate-950 base rather than pure black: less halation on OLED, and card
+       surfaces stay distinguishable from the page. */
+    --background: 222 47% 5%;
+    --foreground: 210 40% 96%;
+    --card: 222 40% 8%;
+    --card-foreground: 210 40% 96%;
+    --popover: 222 40% 9%;
+    --popover-foreground: 210 40% 96%;
+    /* A lighter primary is required for contrast against a dark surface. */
+    --primary: 217 91% 68%;
+    --primary-foreground: 222 47% 8%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 33% 15%;
+    --muted-foreground: 215 20% 68%;
+    --accent: 217 33% 18%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 63% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 33% 20%;
+    --input: 217 33% 22%;
+    --ring: 217 91% 68%;
+
+    --chart-grid: 217 33% 22%;
+    --chart-1: 217 91% 68%;
+    --chart-2: 199 89% 60%;
+    --chart-3: 160 70% 50%;
+    --chart-4: 38 92% 58%;
+    --chart-5: 0 72% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    /* Prevent the mobile browser from re-flowing text on orientation change. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+    /* Horizontal overflow is the most common mobile regression, so it is
+       contained at the root rather than debugged per page. */
+    overflow-x: hidden;
+  }
+
+  /*
+   * Suppresses colour transitions for one frame during a theme switch, so the
+   * toggle does not animate every element on the page.
+   */
+  .theme-transition-guard,
+  .theme-transition-guard *,
+  .theme-transition-guard *::before,
+  .theme-transition-guard *::after {
+    transition: none !important;
+  }
+
+  /* Focus rings must stay visible in both themes. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  code,
+  .font-mono {
+    font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  }
+}
+
+@layer components {
+  /*
+   * Table behaviour.
+   *
+   * Data tables have up to 8 columns and cannot fit a 360px viewport, so they
+   * scroll horizontally with momentum.
+   *
+   * The important detail is `width: max-content` on the table. With the default
+   * `width: 100%` plus a `min-width`, the table's intrinsic minimum width
+   * propagates OUT of this scroll container and widens every ancestor — the card,
+   * the grid column and finally the page, producing ~330px of horizontal page
+   * overflow on a phone. Sizing the table to its content keeps the overflow
+   * *inside* the container where it can be scrolled.
+   */
+  .table-scroll {
+    @apply relative w-full overflow-x-auto overscroll-x-contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-scroll table {
+    width: max-content;
+    min-width: 44rem;
+    max-width: none;
+  }
+
+  .table-scroll th:first-child,
+  .table-scroll td:first-child {
+    @apply sticky left-0 z-10 backdrop-blur-sm;
+    background-color: hsl(var(--card) / 0.96);
+  }
+
+  .table-scroll tr[data-state='selected'] td:first-child {
+    background-color: hsl(var(--muted) / 0.96);
+  }
+
+  /* Edge hint that there is more to scroll horizontally. */
+  .table-scroll::after {
+    content: '';
+    @apply pointer-events-none absolute inset-y-0 right-0 w-6;
+    background: linear-gradient(to left, hsl(var(--card) / 0.85), transparent);
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+
+  /* Hide the scrollbar on the mobile navigation strip. */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Respect users who ask for less motion. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-in,
+    .animate-pulse,
+    .animate-spin {
+      animation: none !important;
+    }
+  }
+}

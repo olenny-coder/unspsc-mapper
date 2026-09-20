@@ -1,0 +1,56 @@
+# Local Postgres for development.
+#
+#   docker compose up -d
+#   echo 'DATABASE_URL="postgresql://postgres:postgres@localhost:5432/unspsc"' >> .env.local
+#   npm run db:migrate && npm run db:seed
+#
+# Neon is the production target; this is only here so you can develop offline.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: unspsc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: unspsc
+      # Faster startup for a throwaway dev database.
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    ports:
+      - '5432:5432'
+    volumes:
+      - unspsc-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d unspsc']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # Optional: run the Render worker locally.
+  #   docker compose --profile worker up
+  worker:
+    profiles: ['worker']
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: unspsc-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/unspsc
+      PORT: '10000'
+      CRON_SECRET: local-cron-secret
+      WORKER_SECRET: local-worker-secret
+      ENRICH_PROVIDER: none
+      CRON_SYNC: '0 3 * * *'
+      CRON_REPORT: '0 6 * * 1'
+    ports:
+      - '10000:10000'
+
+volumes:
+  unspsc-data:
+    driver: local

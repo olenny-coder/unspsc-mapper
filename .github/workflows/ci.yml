@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref to keep the free Actions minutes down.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # `next build` and the tests never need real credentials: DATABASE_URL is only
+  # read when a request touches the database, and the LLM/enrichment clients are
+  # exercised through pure functions in the test suite.
+  NODE_VERSION: '20'
+
+jobs:
+  quality:
+    name: Lint, typecheck, test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify the UNSPSC seed data is present
+        run: |
+          test -f samples/unspsc-v26-en.csv.gz || (echo "samples/unspsc-v26-en.csv.gz is missing" && exit 1)
+          node -e "const z=require('zlib'),f=require('fs');const b=z.gunzipSync(f.readFileSync('samples/unspsc-v26-en.csv.gz'));const lines=b.toString('utf8').split('\n');console.log('UNSPSC seed rows:', lines.length-1);if(lines.length<10000)process.exit(1)"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          # A syntactically valid but unreachable URL: the build must not need a
+          # live database.
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
+          NEXT_PUBLIC_APP_URL: https://example.com
+
+  migrations:
+    name: Validate Drizzle migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: unspsc
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply migrations to a live Postgres
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/unspsc
+
+      - name: Assert the schema is complete
+        run: |
+          PGPASSWORD=ci psql -h 127.0.0.1 -U ci -d unspsc -v ON_ERROR_STOP=1 -c "\dt" | tee /tmp/tables.txt
+          for table in suppliers unspsc_codes classifications corrections enrichment_cache audit_log reports app_settings llm_usage; do
+            grep -q "$table" /tmp/tables.txt || (echo "missing table: $table" && exit 1)
+          done
+
+      - name: Assert the singleton settings row exists
+        run: |
+          count=$(PGPASSWORD=ci psql -h 127.0.0.1 -U ci -d unspsc -tAc "select count(*) from app_settings where id = 1")
+          test "$count" = "1" || (echo "app_settings singleton missing" && exit 1)
+
+      - name: Seed a slice of the UNSPSC taxonomy
+        run: npm run db:seed -- --limit=2000
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/unspsc
+
+      - name: Assert the taxonomy landed
+        run: |
+          count=$(PGPASSWORD=ci psql -h 127.0.0.1 -U ci -d unspsc -tAc "select count(*) from unspsc_codes")
+          echo "seeded codes: $count"
+          test "$count" -gt 1000 || (echo "expected more than 1000 seeded codes" && exit 1)
+
+  # Optional deploy trigger. Enable by setting the VERCEL_DEPLOY_HOOK secret to a
+  # Vercel Deploy Hook URL (Project Settings -> Git -> Deploy Hooks).
+  deploy:
+    name: Trigger deploy hook
+    needs: [quality, migrations]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel deploy hook
+        if: ${{ secrets.DEPLOY_HOOK_URL != '' }}
+        run: |
+          echo "Triggering deploy hook…"
+          curl --fail --silent --show-error -X POST "${{ secrets.DEPLOY_HOOK_URL }}"
+          echo "Deploy hook accepted."
+
+      - name: Skip notice
+        if: ${{ secrets.DEPLOY_HOOK_URL == '' }}
+        run: echo "DEPLOY_HOOK_URL is not configured; skipping. Vercel deploys from GitHub automatically when connected."

@@ -1,0 +1,45 @@
+# .github/repo-metadata.yml
+#
+# Repository description and topics, kept in version control so they can be
+# applied reproducibly instead of being typed into the GitHub UI and forgotten.
+#
+# Apply with the GitHub CLI:
+#
+#   gh repo create unspsc-spend-categorizer --public --source=. --remote=origin --push \
+#     --description "$(yq '.description' .github/repo-metadata.yml)"
+#   yq '.topics[]' .github/repo-metadata.yml | xargs gh repo edit --add-topic
+#
+# Or paste the values into the repository's About panel.
+
+# ~350 characters, which is GitHub's suggested ceiling for the About field.
+description: >-
+  Auto-categorise procurement spend into 8-digit UNSPSC codes with supplier
+  enrichment plus LLM classification. Parent/subsidiary mapping with code
+  inheritance, human review queue, scheduled supplier sync, audit log, and
+  CSV/PDF reporting. Runs on Neon + Render + Vercel free tiers.
+
+# Shown as the repository website. Point at your deployment once it exists.
+homepage: ''
+
+# GitHub allows up to 20 topics. Ordered by likely search value.
+topics:
+  - unspsc
+  - spend-analysis
+  - spend-categorization
+  - procurement
+  - procurement-analytics
+  - supplier-classification
+  - commodity-classification
+  - parent-subsidiary
+  - corporate-hierarchy
+  - llm
+  - llama
+  - groq
+  - nextjs
+  - typescript
+  - drizzle-orm
+  - postgres
+  - neon
+  - vercel
+  - render
+  - tailwindcss

@@ -1,0 +1,38 @@
+# Worker-only image (used by `docker compose --profile worker up`).
+#
+# The Next.js app is deployed to Vercel; this image exists so the Render worker
+# can also be run locally or on any container host.
+FROM node:20-alpine AS base
+WORKDIR /app
+ENV NODE_ENV=production
+# `postgres` and `pdf-lib` are pure JS, so no build toolchain is required.
+RUN apk add --no-cache tini
+
+# ---- dependencies ----------------------------------------------------------
+FROM base AS deps
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
+# ---- runtime ---------------------------------------------------------------
+FROM base AS runner
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json tsconfig.json ./
+COPY lib ./lib
+COPY db ./db
+COPY services ./services
+COPY worker ./worker
+COPY samples ./samples
+COPY scripts ./scripts
+
+# Run as the unprivileged `node` user that ships with the base image.
+RUN chown -R node:node /app
+USER node
+
+ENV PORT=10000
+EXPOSE 10000
+
+HEALTHCHECK --interval=5m --timeout=10s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||10000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["npm", "run", "worker:start"]

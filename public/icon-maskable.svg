@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="UNSPSC Spend Categorizer">
+  <!-- Maskable icon: the mark sits inside the 80% safe zone so Android can crop
+       to a circle or squircle without clipping the letters. -->
+  <rect width="64" height="64" fill="#2563eb"/>
+  <text x="32" y="40" font-family="Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#ffffff" text-anchor="middle">UN</text>
+</svg>

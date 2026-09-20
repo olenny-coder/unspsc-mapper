@@ -1,0 +1,88 @@
+# NOTICE — attributions and third-party licensing
+
+This project's **source code** is MIT licensed (see `LICENSE`). It also
+redistributes one third-party dataset, which is **not** covered by MIT and carries
+its own terms. That distinction is set out below.
+
+---
+
+## 1. UNSPSC taxonomy — `samples/unspsc-v26-en.csv.gz`
+
+**Source:** UNSPSC v26.0801 English codeset, © United Nations Development
+Programme (UNDP). Distributed free of charge by UNDP via
+<https://www.undp.org/unspsc>.
+
+**What is bundled:** the English-language baseline codeset — 149,849 8-digit
+commodity codes with their segment, family and class membership. No substantive
+modification has been made to the taxonomy; the only transformations are
+technical (flattening the hierarchy into one denormalised CSV row per commodity,
+and concatenating synonym/acronym columns into the description). Redistribution is
+therefore of the unmodified baseline codeset.
+
+**Provenance chain:** obtained from the `unspsc-fr` bilingual distribution
+(<https://github.com/codebysaadbouh/unspsc-fr>, data version `v26.0801`), whose
+English rows are themselves sourced from UNDP (`source = "UNDP-v260801"` in that
+project's dataset).
+
+**Terms you must satisfy if you deploy this:**
+
+- **Attribution** — credit UNDP / UNSPSC where the codes or derived
+  classifications are surfaced to users or published (this application already
+  records the taxonomy version on PDF report title pages and in this file).
+- **Trademark** — UNSPSC® is a registered trademark. Do not use the mark in a way
+  that implies endorsement or affiliation, and do not use it in a product name
+  without permission.
+- **Commercial redistribution** — extended commercial reuse of the codeset must be
+  verified with UNDP/UNSPSC. UNDP publishes the codeset free of charge, but the
+  terms of use are theirs to set and are not restated, paraphrased, or replaced by
+  this file. **Check the current terms at <https://www.undp.org/unspsc> before any
+  commercial redistribution.** If your use case requires it, the seed script
+  accepts your own licensed copy via `UNSPSC_SEED_CSV` (or `npm run db:seed --
+  --file=path/to/your.csv`), so you can source the taxonomy directly from UNDP
+  instead of relying on the bundled extract.
+
+**Not included:** the French translations carried by the upstream `unspsc-fr`
+project are derived from the Government of Canada's *Mappage NIBS-UNSPSC* and the
+archived *UNSPSC version 10 bilingue* dataset, under the
+[Open Government Licence – Canada](https://ouvert.canada.ca/en/open-government-licence-canada).
+This repository ships the English columns only, so that licence does not apply
+here. If you switch `UNSPSC_SEED_CSV` to a bilingual file, the Canadian OGL
+attribution requirements apply to the French rows and you must credit the
+Government of Canada.
+
+---
+
+## 2. UNSPSC-derived example data — `samples/suppliers.csv`, `samples/transactions.csv`
+
+Synthetic sample data authored for this repository, for testing and demonstration
+only. Company names are real trademarks used descriptively to exercise
+parent/subsidiary resolution (for example Dell Technologies and its subsidiaries).
+**The spend amounts are invented** and do not represent any organisation's actual
+procurement, contracts, or commercial relationships. The MIT license applies to
+these files.
+
+---
+
+## 3. Third-party software
+
+Runtime and build dependencies are declared in `package.json` and remain under
+their own licenses (all permissive at the time of writing: MIT, ISC, Apache-2.0,
+BSD). Notable components:
+
+| Package | Purpose | License |
+|---|---|---|
+| Next.js, React | application framework | MIT |
+| Drizzle ORM | database toolkit | Apache-2.0 |
+| `postgres` (postgres.js) | PostgreSQL driver | Unlicense |
+| `pdf-lib` | PDF report rendering | MIT |
+| `papaparse` | CSV parsing/serialisation | MIT |
+| `recharts` | dashboard chart | MIT |
+| Tailwind CSS, Radix UI, shadcn/ui patterns | styling and UI primitives | MIT |
+| Zod | schema validation | MIT |
+| `croner` | worker cron scheduling | MIT |
+
+UNSPSC classification itself is performed by **Groq-hosted Llama models**, which
+are subject to the [Meta Llama license](https://llama.meta.com/llama-dl/) and
+Groq's terms of service. Your prompts and supplier data are transmitted to Groq
+when classification runs; review that arrangement against your own data-protection
+obligations before processing third-party supplier data.

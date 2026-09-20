@@ -1,0 +1,126 @@
+# Sample supplier spend file for the UNSPSC Spend Categorizer.
+#
+# Deliberately mixes:
+#   - independent companies (Dell, Grainger, Microsoft, FedEx, Pfizer)
+#   - a parent and its subsidiaries, declared explicitly via the `parent` column
+#     (Dell Technologies -> EMC Corporation, VMware; Alphabet -> Google Cloud;
+#      Siemens AG -> Siemens Healthineers, Mentor Graphics)
+#   - messy formatting that the importer normalises:
+#       * "ACME  CO., LTD" and "Acme Co" must collapse into one supplier
+#       * "$1,250,000.00" style amounts and US date formats
+#       * rows with only a name (no amount)
+#
+# Columns: name,amount,date,domain,industry,naics,parent
+name,amount,date,domain,industry,naics,parent
+Dell Technologies,1250000.00,2024-03-01,dell.com,Computer manufacturing,334111,
+EMC Corporation,184500.50,2024-03-04,emc.com,Computer storage device manufacturing,334112,Dell Technologies
+VMware,96500.00,2024-03-06,vmware.com,Software publishers,511210,Dell Technologies
+Grainger,$52300.00,2024-03-05,grainger.com,Industrial supplies merchant wholesalers,423840,
+Microsoft,875000.00,2024-03-07,microsoft.com,Software publishers,511210,
+LinkedIn,42000.00,2024-03-08,linkedin.com,Web search portals and social networks,519130,Microsoft
+Microsoft Azure,230000.00,2024-03-09,azure.microsoft.com,Cloud computing services,518210,Microsoft
+FedEx,158000.00,2024-03-10,fedex.com,Courier and express delivery services,492110,
+FedEx Freight,61000.00,2024-03-11,fedex.com,General freight trucking local,484121,FedEx
+Pfizer,410000.00,2024-03-12,pfizer.com,Pharmaceutical preparation manufacturing,325412,
+Alphabet,0.00,2024-03-13,abc.xyz,Web search portals,519130,
+Google Cloud,312000.00,2024-03-14,cloud.google.com,Cloud computing services,518210,Alphabet
+Siemens AG,540000.00,2024-03-15,siemens.com,Industrial machinery manufacturing,333249,
+Siemens Healthineers,178000.00,2024-03-16,siemens-healthineers.com,Electromedical apparatus manufacturing,334510,Siemens AG
+Mentor Graphics,39500.00,2024-03-17,mentor.com,Software publishers,511210,Siemens AG
+Bechtel,289000.00,03/18/2024,bechtel.com,Engineering services,541330,
+ManpowerGroup,74500.00,2024-03-19,manpowergroup.com,Temporary help services,561320,
+Salesforce,266000.00,2024-03-20,salesforce.com,Software publishers,511210,
+Slack Technologies,31000.00,2024-03-21,slack.com,Software publishers,511210,Salesforce
+Cisco Systems,324000.00,2024-03-22,cisco.com,Communications equipment manufacturing,334220,
+Splunk,58000.00,2024-03-23,splunk.com,Software publishers,511210,Cisco Systems
+"ACME  CO., LTD","$1,250.00",2024-03-24,acme.com,Fastener manufacturing,332722,
+Acme Co,8750.00,2024-03-25,acme.com,Fastener manufacturing,332722,
+W.W. Grainger Canada,15000.00,2024-03-26,grainger.ca,Industrial supplies merchant wholesalers,423840,Grainger
+Aramark,92500.00,2024-03-27,aramark.com,Food service contractors,722310,
+Sysco,143000.00,2024-03-28,sysco.com,Packaged frozen food merchant wholesalers,424420,
+Unilever,210000.00,2024-03-29,unilever.com,Soap and cleaning compound manufacturing,325611,
+Unilever Food Solutions,47000.00,2024-03-30,unileverfoodsolutions.com,Packaged frozen food merchant wholesalers,424420,Unilever
+3M,158000.00,2024-03-31,3m.com,Adhesive manufacturing,325520,
+SAP SE,392000.00,2024-04-01,sap.com,Software publishers,511210,
+Oracle,275000.00,2024-04-02,oracle.com,Software publishers,511210,
+Cintas,38500.00,2024-04-03,cintas.com,Industrial launderers,812332,
+Pitney Bowes,21500.00,2024-04-04,pitneybowes.com,Office machinery manufacturing,333318,
+Honeywell,196000.00,2024-04-05,honeywell.com,Industrial process variable instruments,334513,
+Honeywell Building Solutions,73000.00,2024-04-06,buildings.honeywell.com,Plumbing and HVAC contractor services,238220,Honeywell
+Johnson Controls,142000.00,2024-04-07,johnsoncontrols.com,Plumbing and HVAC contractor services,238220,
+CBRE Group,88000.00,2024-04-08,cbre.com,Offices of real estate agents and brokers,531210,
+Kelly Services,54000.00,2024-04-09,kellyservices.com,Temporary help services,561320,
+Xerox,67800.00,2024-04-10,xerox.com,Computer terminal and peripheral manufacturing,334118,
+Ricoh,45900.00,2024-04-11,ricoh.com,Computer terminal and peripheral manufacturing,334118,
+Vodafone,124000.00,2024-04-12,vodafone.com,Wireless telecommunications carriers,517312,
+Verizon Business,167000.00,2024-04-13,verizon.com,Wireless telecommunications carriers,517312,Verizon Communications
+Verizon Communications,0.00,2024-04-14,verizon.com,Wireless telecommunications carriers,517312,
+Nestle,132000.00,2024-04-15,nestle.com,Packaged frozen food merchant wholesalers,424420,
+Nestle Waters,18500.00,2024-04-16,nestle-waters.com,Bottled water manufacturing,312112,Nestle
+Staples,27300.00,2024-04-17,staples.com,Stationery and office supplies merchant wholesalers,424120,
+Office Depot,31200.00,2024-04-18,officedepot.com,Stationery and office supplies merchant wholesalers,424120,
+CDW,198000.00,2024-04-19,cdw.com,Computer and software merchant wholesalers,423430,
+Insight Enterprises,145000.00,2024-04-20,insight.com,Computer and software merchant wholesalers,423430,
+Accenture,412000.00,2024-04-21,accenture.com,Administrative management consulting services,541611,
+Deloitte,377000.00,2024-04-22,deloitte.com,Offices of certified public accountants,541211,
+Ernst & Young,298000.00,2024-04-23,ey.com,Offices of certified public accountants,541211,
+KPMG,255000.00,2024-04-24,kpmg.com,Offices of certified public accountants,541211,
+PwC,241000.00,2024-04-25,pwc.com,Offices of certified public accountants,541211,
+Marriott International,164000.00,2024-04-26,marriott.com,Hotels and motels,721110,
+Hilton Worldwide,121000.00,2024-04-27,hilton.com,Hotels and motels,721110,
+Delta Air Lines,398000.00,2024-04-28,delta.com,Scheduled passenger air transportation,481111,
+United Airlines,285000.00,2024-04-29,united.com,Scheduled passenger air transportation,481111,
+Enterprise Rent-A-Car,67000.00,2024-04-30,enterprise.com,Passenger car rental,532111,
+Shell,152000.00,2024-05-01,shell.com,Petroleum refineries,324110,
+BP,138000.00,2024-05-02,bp.com,Petroleum refineries,324110,
+Chevron,129000.00,2024-05-03,chevron.com,Petroleum refineries,324110,
+Waste Management,84000.00,2024-05-04,wm.com,Solid waste collection,562111,
+Republic Services,76000.00,2024-05-05,republicservices.com,Solid waste collection,562111,
+Iron Mountain,34000.00,2024-05-06,ironmountain.com,All other support services,561990,
+ADP,91000.00,2024-05-07,adp.com,Payroll services,541214,
+Workday,88000.00,2024-05-08,workday.com,Software publishers,511210,
+Zoom Video Communications,41000.00,2024-05-09,zoom.us,Software publishers,511210,
+ServiceNow,96000.00,2024-05-10,servicenow.com,Software publishers,511210,
+Atlassian,37000.00,2024-05-11,atlassian.com,Software publishers,511210,
+Amazon Web Services,412000.00,2024-05-12,aws.amazon.com,Cloud computing services,518210,Amazon.com
+Amazon.com,0.00,2024-05-13,amazon.com,Electronic shopping and mail-order houses,454110,
+Adobe,143000.00,2024-05-14,adobe.com,Software publishers,511210,
+Autodesk,51000.00,2024-05-15,autodesk.com,Software publishers,511210,
+Snowflake,39000.00,2024-05-16,snowflake.com,Cloud computing services,518210,
+Databricks,44000.00,2024-05-17,databricks.com,Cloud computing services,518210,
+Nvidia,268000.00,2024-05-18,nvidia.com,Semiconductor and related device manufacturing,334413,
+Intel,187000.00,2024-05-19,intel.com,Semiconductor and related device manufacturing,334413,
+AMD,94000.00,2024-05-20,amd.com,Semiconductor and related device manufacturing,334413,
+Lenovo,76000.00,2024-05-21,lenovo.com,Electronic computer manufacturing,334111,
+HP Inc.,83000.00,2024-05-22,hp.com,Electronic computer manufacturing,334111,
+Hewlett Packard Enterprise,91000.00,2024-05-23,hpe.com,Electronic computer manufacturing,334111,
+Canon,29000.00,2024-05-24,canon.com,Computer terminal and peripheral manufacturing,334118,
+Konica Minolta,24000.00,2024-05-25,konicaminolta.com,Computer terminal and peripheral manufacturing,334118,
+Kuehne + Nagel,39000.00,2024-05-26,kuehne-nagel.com,Freight transportation arrangement,488510,
+DHL Supply Chain,58000.00,2024-05-27,dhl.com,Freight transportation arrangement,488510,Deutsche Post DHL
+Deutsche Post DHL,0.00,2024-05-28,dhl.com,Courier and express delivery services,492110,
+Maersk,112000.00,2024-05-29,maersk.com,Deep sea freight transportation,483111,
+C.H. Robinson,47000.00,2024-05-30,chrobinson.com,Freight transportation arrangement,488510,
+Global Industrial,19000.00,2024-05-31,globalindustrial.com,Industrial supplies merchant wholesalers,423840,
+Fastenal,43000.00,2024-06-01,fastenal.com,Industrial supplies merchant wholesalers,423840,
+W.W. Grainger Mexico,12000.00,2024-06-02,grainger.com.mx,Industrial supplies merchant wholesalers,423840,Grainger
+Airgas,28000.00,2024-06-03,airgas.com,Industrial gas manufacturing,325120,
+Linde,61000.00,2024-06-04,linde.com,Industrial gas manufacturing,325120,
+Praxair,21000.00,2024-06-05,praxair.com,Industrial gas manufacturing,325120,Linde
+Thermo Fisher Scientific,224000.00,2024-06-06,thermofisher.com,Analytical laboratory instrument manufacturing,334516,
+Fisher Scientific,88000.00,2024-06-07,fishersci.com,Professional equipment merchant wholesalers,423490,Thermo Fisher Scientific
+VWR International,31000.00,2024-06-08,vwr.com,Professional equipment merchant wholesalers,423490,
+Sigma-Aldrich,27000.00,2024-06-09,sigmaaldrich.com,In-vitro diagnostic substance manufacturing,325413,Merck KGaA
+Merck KGaA,96000.00,2024-06-10,merckgroup.com,Pharmaceutical preparation manufacturing,325412,
+Becton Dickinson,52000.00,2024-06-11,bd.com,Surgical and medical instrument manufacturing,339112,
+Medtronic,118000.00,2024-06-12,medtronic.com,Surgical and medical instrument manufacturing,339112,
+Stryker,97000.00,2024-06-13,stryker.com,Surgical and medical instrument manufacturing,339112,
+Cardinal Health,134000.00,2024-06-14,cardinalhealth.com,Medical and dental supplies merchant wholesalers,423450,
+McKesson,241000.00,2024-06-15,mckesson.com,Medical and dental supplies merchant wholesalers,423450,
+Cintas Facility Services,22000.00,2024-06-16,cintas.com,Industrial launderers,812332,Cintas
+Uniform Supplier Inc,9500.00,2024-06-17,uniformsupplier.com,Industrial launderers,812332,
+Gartner,63000.00,2024-06-18,gartner.com,Administrative management consulting services,541611,
+Forrester Research,18000.00,2024-06-19,forrester.com,Administrative management consulting services,541611,
+Robert Half,39000.00,2024-06-20,roberthalf.com,Temporary help services,561320,
+Randstad,47000.00,2024-06-21,randstad.com,Temporary help services,561320,
+Adecco,33000.00,2024-06-22,adecco.com,Temporary help services,561320,
