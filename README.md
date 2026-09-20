@@ -431,7 +431,8 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 │   ├── retry.ts                    # backoff, Retry-After, mapLimit
 │   ├── unspsc-seed.ts              # taxonomy CSV → row mapping
 │   ├── utils.ts                    # cn()
-│   └── validation.ts               # Zod contracts with explicit interfaces
+│   ├── validation.ts               # Zod contracts with explicit interfaces
+│   └── vercel-origin.mjs           # build-time repair of Vercel origin vars (plain .mjs: next.config.mjs imports it)
 ├── services/
 │   ├── audit.ts                    # audit writes + queries
 │   ├── classification.ts           # plan, classify, propagate, correct, review queue
@@ -462,7 +463,7 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 │   ├── suppliers.csv               # 120+ suppliers incl. parents & subsidiaries
 │   ├── transactions.csv            # transaction-level shape (amounts aggregated)
 │   └── unspsc-v26-en.csv.gz        # 149,849 UNSPSC v26 codes (3.8 MB gz)
-├── tests/                          # 169 Vitest tests
+├── tests/                          # 264 Vitest tests
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
 ├── Dockerfile.worker
@@ -915,6 +916,8 @@ npx tsx scripts/smoke-offline.ts   # end-to-end pipeline check without a databas
 | `tests/upload.test.ts` | Delimiter detection, CSV parsing, sample-file integrity, taxonomy seed mapping |
 | `tests/auth.test.ts` | Session-token signing/expiry/tamper resistance, credential extraction, public-path allowlist, fail-closed rules |
 | `tests/theme.test.ts` | Theme resolution parity between the pre-paint boot script and the React provider, token sanity, script syntax |
+| `tests/env.test.ts` | **Build vs runtime env policy**: a bad value warns and defaults during a build but throws at runtime naming the variable; scheme-less URLs; placeholder handling |
+| `tests/vercel-origin.test.ts` | The Vercel origin guard: bare host kept, full URL narrowed to its host, unusable value dropped, variables Next.js owns |
 
 Nothing in the suite needs network access or a database: the hierarchy, merge, prompt, cron and
 reporting layers are pure functions, which is exactly why they are testable.
@@ -948,11 +951,26 @@ taxonomy seeded:
 
 ### If the Vercel build fails with no useful message
 
+This class of failure is now prevented at the source, so a bad environment value can no longer
+fail a build — but the history is worth keeping, because it explains the warnings you may see.
+
 `Failed to collect page data for /_not-found` means the root layout threw while its metadata was
 evaluated — before any page rendered. `app/layout.tsx` resolves the public origin at module scope,
-so a bad environment value aborts the whole deploy with a message that names nothing.
+so a bad environment value aborted the whole deploy with a message that named nothing. The route in
+the message is arbitrary: it is whichever page reaches the root layout first, so one
+misconfiguration can report `/_not-found`, `/login` or `/`.
 
-**Find the culprit in one step — delete the optional variables.** Only `DATABASE_URL` is required:
+Two guards now stop that:
+
+* `lib/env.ts` validates strictly **at runtime** but only **warns during a build**, so an unusable
+  value falls back to its default and the deploy proceeds. The build log names the variable:
+  `[env] Ignoring 1 invalid environment variable for this build: SYNC_STALE_DAYS (expected an
+  integer, received "30 days").`
+* `lib/vercel-origin.mjs` repairs or drops a malformed `VERCEL_PROJECT_PRODUCTION_URL`,
+  `VERCEL_URL` or `VERCEL_BRANCH_URL` before Next.js reads them (`next.config.mjs` runs it).
+
+**So: read the `[env]` line in the build log and delete that variable.** Only `DATABASE_URL` is
+required:
 
 ```
 Keep:    DATABASE_URL, DASHBOARD_SECRET, WORKER_SECRET, GROQ_API_KEY
@@ -961,7 +979,8 @@ Delete:  everything else
 
 `CLASSIFY_CONFIDENCE_THRESHOLD`, `SYNC_STALE_DAYS`, `LLM_BATCH_SIZE`, `ENRICH_PROVIDER`,
 `CLASSIFY_MODEL_STRATEGY`, `SITE_URL` and `APP_ORIGIN` all have working defaults and are safe to
-remove entirely. Redeploy; if it succeeds, add them back one at a time.
+remove entirely. The build succeeds either way now, but a bad value still throws on the first
+request at runtime, so deleting it is the real fix rather than a workaround.
 
 Or reproduce locally, which prints a pass/fail matrix for twenty input shapes:
 
@@ -969,18 +988,19 @@ Or reproduce locally, which prints a pass/fail matrix for twenty input shapes:
 npx tsx scripts/diagnose-build.ts
 ```
 
-Do **not** re-push to fix this. The value lives in the Vercel dashboard, not the repo — and
-environment variables are read at build time, so changing one does not retroactively fix an
-existing deployment. Use **Deployments → ⋯ → Redeploy** after saving.
+Do **not** re-push to fix an environment *value*. The value lives in the Vercel dashboard, not the
+repo — and environment variables are read at build time, so changing one does not retroactively fix
+an existing deployment. Use **Deployments → ⋯ → Redeploy** after saving. (The guards above are code,
+so they do need the usual one push before they take effect.)
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | Dev server serves 500 with `Unexpected token 'div'. Expected jsx identifier` for a file that builds fine | Corrupt webpack cache in `.next/` (common after a killed process), not a code error | Stop the server, delete `.next`, restart. If `npm run build` and `npm run typecheck` both pass, the source is fine. |
 | Visual audit reports a mobile viewport as ~720px | `window.innerWidth` disagrees with the CSS viewport in headless Chromium | The harness measures `document.documentElement.clientWidth` and asserts it, so a wrong width fails loudly rather than silently testing desktop layout. |
-| **Vercel: `Failed to collect page data for /_not-found`** | An environment variable is aborting the build. Three distinct causes — see the table below | Diagnose locally with `npx tsx scripts/diagnose-build.ts`, which prints a pass/fail matrix for every input shape |
+| **Vercel: `Failed to collect page data for /_not-found`** | An environment variable aborted the build (now prevented — see above). The route named is whichever reached the root layout first | Read the `[env]` warning in the build log and delete the variable it names; reproduce locally with `npx tsx scripts/diagnose-build.ts` |
 | `Invalid environment configuration: X: expected 0..1, received "70"` | `CLASSIFY_CONFIDENCE_THRESHOLD` is a probability, not a percentage | Set `0.7`, or delete the variable (it defaults to `0.7`) |
 | `Invalid environment configuration: X: expected an integer, received "30 days"` | A numeric variable carries a unit suffix | Use `30`, not `30 days` |
-| ~36 × `TypeError: Invalid URL` during the Vercel build, exit 1 | **Next.js itself**, not this app: Next reads `VERCEL_PROJECT_PRODUCTION_URL` directly for `metadataBase`, so a value like `:` or one containing spaces breaks it before any app code runs | Set `SITE_URL` to the absolute origin (the documented override) or unset the offending variable — no code change can prevent this one |
+| ~36 × `TypeError: Invalid URL` during the Vercel build, exit 1 | **Next.js itself**, not this app: Next reads `VERCEL_PROJECT_PRODUCTION_URL` directly for `metadataBase`, with no `try`/`catch`, and does so even when the app supplies its own `metadataBase` | Fixed: `lib/vercel-origin.mjs` repairs a full URL to its host or drops an unusable value before Next reads it, and `next.config.mjs` runs that before prerender workers are forked |
 | `Dynamic Code Evaluation ... not allowed in Edge Runtime` | Something in the middleware graph reached for `eval`/`require` | Fixed: env-file loading now lives in `lib/env-node.ts`, which middleware never imports |
 | `DATABASE_URL is not configured` | Missing env var | Add it to `.env.local` (dev) or the Vercel/Render dashboard. |
 | `/api/health` shows `database: ok: false` | Wrong connection string, or Neon suspended | Use the **pooled** string with `?sslmode=require`; open the Neon console to wake the project. |

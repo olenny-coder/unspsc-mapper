@@ -262,35 +262,90 @@ export type Env = z.infer<typeof envSchema>;
 let cached: Env | null = null;
 
 /**
- * Parse `process.env`. Throws `ConfigError` with a readable summary when a
- * value is structurally invalid (not when it is merely absent).
+ * True while `next build` is running.
+ *
+ * Next sets `NEXT_PHASE=phase-production-build` for the build process. During a
+ * build the environment is only needed for static metadata (canonical URLs, Open
+ * Graph tags); the real configuration matters at *runtime*, in the serverless
+ * function. Treating those differently is what stops one mistyped dashboard value
+ * from turning a deploy into an unreadable build failure.
+ */
+function isBuildPhase(): boolean {
+  return process.env.NEXT_PHASE === 'phase-production-build';
+}
+
+type EnvIssue = { variable: string; problem: string };
+
+/**
+ * Runtime message: one line per problem, variable name first.
+ *
+ * This is thrown, so it is read once and legibility wins — but the variable name
+ * still leads each line so it survives the tail-truncation that CI applies.
+ */
+function formatIssues(issues: EnvIssue[]): string {
+  return [
+    'Invalid environment configuration — fix these environment variables:',
+    ...issues.map((entry) => `  ${entry.variable} — ${entry.problem}`),
+    '',
+    'Only DATABASE_URL is required; every other variable has a working default, so deleting the',
+    'offending one is a valid fix. In Vercel, saving a value is not enough — redeploy.',
+  ].join('\n');
+}
+
+/**
+ * Build message: a single line, however many variables are wrong.
+ *
+ * `getEnv()` is memoised per process, but Next prerenders in a pool of short-lived
+ * worker processes, so this fires once per worker — measured at sixteen for this
+ * app. A multi-line block repeated sixteen times buries the very variable names it
+ * exists to surface, so the build path stays on one line.
+ */
+function formatIssuesInline(issues: EnvIssue[]): string {
+  const noun = issues.length === 1 ? 'variable' : 'variables';
+  const detail = issues.map((entry) => `${entry.variable} (${entry.problem})`).join('; ');
+  return (
+    `[env] Ignoring ${issues.length} invalid environment ${noun} for this build: ${detail}. ` +
+    'Defaults are in use and the deploy can proceed; delete the offending variable to silence this. ' +
+    'In Vercel, saving a value is not enough — redeploy.'
+  );
+}
+
+/**
+ * Parse `process.env`.
+ *
+ * **During a build** an invalid value is reported as a loud warning and the
+ * defaults are used, so a deployment always builds. Reference metadata is not
+ * worth failing a deploy over, and the alternative — aborting with
+ * `Failed to collect page data for /_not-found` — names nothing and cannot be
+ * debugged from a truncated log.
+ *
+ * **At runtime** an invalid value throws, so a genuine misconfiguration surfaces
+ * immediately and legibly on the first request rather than silently running with
+ * the wrong settings.
  */
 export function getEnv(): Env {
   if (cached) return cached;
   const parsed = envSchema.safeParse(process.env);
+
   if (!parsed.success) {
-    /*
-     * One line per failure, variable name first.
-     *
-     * The previous single-line summary sat above a Zod detail dump, so a log tail
-     * (which shows only the last N lines) displayed an array of `[Object]` entries
-     * and nothing identifying the culprit. Each line below is self-contained so it
-     * survives truncation.
-     */
     const issues = parsed.error.issues.map((issue) => ({
       variable: issue.path.join('.') || '(root)',
       problem: issue.message,
     }));
-    const summary = [
-      'Invalid environment configuration — fix these environment variables:',
-      ...issues.map((entry) => `  ${entry.variable} — ${entry.problem}`),
-      '',
-      'Only DATABASE_URL is required; every other variable has a working default, so deleting the',
-      'offending one is a valid fix. In Vercel, saving a value is not enough — redeploy.',
-    ].join('\n');
 
-    throw new ConfigError(summary, { issues: issues as unknown as Record<string, unknown> });
+    if (isBuildPhase()) {
+      console.warn(formatIssuesInline(issues));
+      // Re-parse with only NODE_ENV so every default applies.
+      const fallback = envSchema.safeParse({ NODE_ENV: process.env.NODE_ENV });
+      if (fallback.success) {
+        cached = fallback.data;
+        return cached;
+      }
+    }
+
+    throw new ConfigError(formatIssues(issues), { issues: issues as unknown as Record<string, unknown> });
   }
+
   cached = parsed.data;
   return cached;
 }

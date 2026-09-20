@@ -5,6 +5,17 @@
  * feature and makes `next lint`/`next build` throw).
  */
 
+import { sanitizeVercelOrigins } from './lib/vercel-origin.mjs';
+
+/*
+ * Run before anything else: Next itself calls
+ * `new URL(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`)` while
+ * resolving social-image metadata, unguarded, and a malformed value aborts the
+ * build. This executes while Next loads its config — before any
+ * static-generation worker is forked — so the correction is inherited by them.
+ */
+sanitizeVercelOrigins();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

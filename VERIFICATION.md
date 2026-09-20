@@ -9,9 +9,28 @@ seeded. Recorded here so a reviewer can reproduce each step.
 |---|---|
 | `npm run lint` (`next lint --max-warnings=0`) | ✔ No ESLint warnings or errors |
 | `npm run typecheck` (`tsc --noEmit`) | clean |
-| `npm test` (Vitest) | 12 files, **239 tests passed** |
+| `npm test` (Vitest) | 14 files, **264 tests passed** |
 | `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
+
+## Deployment build resilience
+
+`next build` was run with `VERCEL=1 CI=1 NODE_ENV=production` against deliberately hostile
+configuration, because a build that fails on a mistyped dashboard field is a build nobody can debug
+from a truncated log. Every row below is a real invocation, not a projection.
+
+| Input | Before | After |
+|---|---|---|
+| `CLASSIFY_CONFIDENCE_THRESHOLD=70` | exit 1 — `Failed to collect page data for /login` | exit 0, warns `CLASSIFY_CONFIDENCE_THRESHOLD (expected 0..1, received "70")` |
+| `SYNC_STALE_DAYS=30 days` | exit 1 | exit 0, warns with the variable named |
+| `VERCEL_PROJECT_PRODUCTION_URL=":"` | exit 1 — 36 × `TypeError: Invalid URL`, no variable named | exit 0 — `[next.config] Ignoring malformed ... falling back to the default origin` |
+| `VERCEL_PROJECT_PRODUCTION_URL=https://unspsc-mapper.vercel.app` | exit 0 (accepted, though not a bare host) | exit 0 — narrowed to `unspsc-mapper.vercel.app` |
+| `SITE_URL` / `APP_ORIGIN` with no scheme | exit 0 after the `urlFromString` tolerance fix | exit 0 |
+| `DATABASE_URL` empty, or not a URL | exit 0, runtime error on first request | exit 0, same |
+| All of the above at once | exit 1 | exit 0 — 33 routes generated, 0 `Invalid URL`, 0 page-data failures |
+
+The guards are covered by `tests/env.test.ts` and `tests/vercel-origin.test.ts` (20 tests), so the
+build cannot silently regress to failing on configuration.
 
 ## SEO surfaces
 
@@ -256,4 +275,8 @@ Keep-alive script:
 | Visual harness: compared `window.innerWidth` | Disagreed with the CSS viewport in headless Chromium (722 vs 390), masking real overflow | Anchor on `document.documentElement.clientWidth`, which is what media queries use |
 | Visual harness: `elementFromPoint` clickable-area probe | Reported 1×1 for every control (delegated clicks resolve to an ancestor), producing false failures | Read `::after` inset geometry from computed styles and attribute the hit area to a checkbox's `<label>` |
 | Checkboxes, switches and sort headers were 16–22px | Below the WCAG 2.5.8 24px minimum; hard to tap on mobile | 32–36px padded hit areas via wrapper elements and pseudo-elements, without changing the visual density |
+| **Build failed on Vercel as `Failed to collect page data for /_not-found`** | The whole deploy was blocked by a message naming no file, no variable and no cause — it cost three redeploys to not diagnose | `app/layout.tsx` resolves metadata defensively; the real cause was that `getEnv()` threw while the root layout was evaluated during page-data collection. Reproduced locally by reverting the guard: exit 1, and the route named varies by build order (`/login` locally, `/_not-found` on Vercel) |
+| Any invalid environment value aborted a deployment | A typo in a dashboard field (`CLASSIFY_CONFIDENCE_THRESHOLD=70`, `SYNC_STALE_DAYS=30 days`) failed the build with an unreadable message | `getEnv()` is strict at runtime but warns and falls back to defaults during a build (`isBuildPhase()`), naming each bad variable in one compact log line; `app/not-found.tsx` added so the route has an explicit owner |
+| **~36 × `TypeError: Invalid URL` during the Vercel build, exit 1** | Unfixable from app code as previously documented: Next.js itself runs `new URL(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`)` unguarded in `lib/metadata/resolvers/resolve-url.js`, and does so even when the app supplies its own `metadataBase` | `lib/vercel-origin.mjs` repairs a full URL to its host and drops an unusable value; `next.config.mjs` runs it before prerender workers are forked, so the correction is inherited. Verified: the same input that produced exit 1 and 36 errors now builds clean |
+| Environment warning repeated once per prerender worker | Sixteen multi-line blocks buried the variable names they existed to surface | The build path emits a single compact line per process; memoisation keeps it to one call per process. Locked in by a test asserting no newline and exactly one call |
 
