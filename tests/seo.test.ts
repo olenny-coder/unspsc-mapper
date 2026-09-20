@@ -66,8 +66,6 @@ describe('siteUrl', () => {
   it('prefers an explicit SITE_URL and strips trailing slashes', () => {
     setEnv({ SITE_URL: 'https://spend.example.com///' });
     expect(siteUrl()).toBe('https://spend.example.com');
-    // Legacy Vercel URL: NEXT_PUBLIC_APP_URL, which is http by default.
-    expect(siteUrl()).toBe('https://spend.example.com');
   });
 
   it('falls back to the Vercel production URL, which needs a scheme added', () => {
@@ -78,6 +76,33 @@ describe('siteUrl', () => {
   it('falls back to NEXT_PUBLIC_APP_URL last', () => {
     setEnv({ NEXT_PUBLIC_APP_URL: 'http://localhost:4321' });
     expect(siteUrl()).toBe('http://localhost:4321');
+  });
+
+  /*
+   * Regression tests for a real Vercel build failure:
+   * "Failed to collect page data for /_not-found" caused by `new URL()` throwing
+   * on a scheme-less NEXT_PUBLIC_APP_URL. That surfaced as a bare
+   * `TypeError: Invalid URL` with no indication of which variable was at fault.
+   */
+  it('tolerates a missing scheme instead of crashing the build', () => {
+    setEnv({ NEXT_PUBLIC_APP_URL: 'unspsc-mapper.vercel.app' });
+    expect(siteUrl()).toBe('http://unspsc-mapper.vercel.app');
+  });
+
+  it('tolerates a missing scheme in SITE_URL too', () => {
+    setEnv({ SITE_URL: 'spend.example.com' });
+    expect(siteUrl()).toBe('http://spend.example.com');
+  });
+
+  it('treats a literal "undefined" string as unset', () => {
+    // A dashboard that stored the string would otherwise yield http://undefined.
+    setEnv({ NEXT_PUBLIC_APP_URL: 'undefined' });
+    expect(siteUrl()).toBe('http://localhost:3000');
+  });
+
+  it('normalises so callers can append paths safely', () => {
+    setEnv({ SITE_URL: 'https://spend.example.com/' });
+    expect(canonicalUrl('/review')).toBe('https://spend.example.com/review');
   });
 });
 

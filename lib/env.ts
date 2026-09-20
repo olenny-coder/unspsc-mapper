@@ -82,6 +82,41 @@ const optionalString = z
     return trimmed.length ? trimmed : undefined;
   });
 
+/**
+ * A URL that tolerates a missing scheme.
+ *
+ * `new URL('yourapp.vercel.app')` throws, but that is exactly what people type
+ * into a `NEXT_PUBLIC_APP_URL` field, and the resulting build failure reads
+ * `TypeError: Invalid URL` with no hint about which variable was at fault.
+ * `http://` is assumed when no scheme is present, the hostname is required, and
+ * anything still unparseable fails with the variable's name in the message.
+ */
+const urlFromString = (fallback: string) =>
+  z
+    .string()
+    .default(fallback)
+    .transform((value, ctx) => {
+      const raw = value.trim();
+      if (!raw) return fallback;
+      // A dashboard that stored the literal string wins over a missing value:
+      // `NEXT_PUBLIC_APP_URL=undefined` would otherwise parse as http://undefined
+      // and silently produce broken canonical and Open Graph URLs.
+      if (['undefined', 'null', 'none', 'false'].includes(raw.toLowerCase())) return fallback;
+      const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+      try {
+        const parsed = new URL(candidate);
+        if (!parsed.hostname) throw new Error('missing hostname');
+        // Normalise: drop a trailing slash so callers can append paths safely.
+        return candidate.replace(/\/+$/, '');
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `expected an absolute URL such as "https://your-app.vercel.app", received "${value}"`,
+        });
+        return z.NEVER;
+      }
+    });
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -89,7 +124,7 @@ const envSchema = z.object({
   DATABASE_URL_UNPOOLED: optionalString,
 
   GROQ_API_KEY: optionalString,
-  GROQ_BASE_URL: z.string().default('https://api.groq.com/openai/v1'),
+  GROQ_BASE_URL: urlFromString('https://api.groq.com/openai/v1'),
   GROQ_MODEL_ACCURATE: z.string().default('llama-3.3-70b-versatile'),
   GROQ_MODEL_BULK: z.string().default('llama-3.1-8b-instant'),
 
@@ -107,9 +142,28 @@ const envSchema = z.object({
   /** Set to 'false' to disable the development auth bypass (never in production). */
   ALLOW_UNAUTHENTICATED_DEV: boolFromString(true),
 
-  NEXT_PUBLIC_APP_URL: z.string().default('http://localhost:3000'),
+  NEXT_PUBLIC_APP_URL: urlFromString('http://localhost:3000'),
   /** Canonical public origin used for SEO metadata, sitemap and OG URLs. */
-  SITE_URL: optionalString,
+  SITE_URL: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      const raw = (value ?? '').trim();
+      if (!raw) return undefined;
+      if (['undefined', 'null', 'none', 'false'].includes(raw.toLowerCase())) return undefined;
+      const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+      try {
+        const parsed = new URL(candidate);
+        if (!parsed.hostname) throw new Error('missing hostname');
+        return candidate.replace(/\/+$/, '');
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `expected an absolute URL such as "https://your-domain.com", received "${value}"`,
+        });
+        return z.NEVER;
+      }
+    }),
   /**
    * Whether search engines may index the app.
    *

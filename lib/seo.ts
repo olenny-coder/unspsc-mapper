@@ -65,10 +65,16 @@ export const SITE_KEYWORDS = [
  */
 export function siteUrl(): string {
   const env = getEnv();
+  // Already normalised by lib/env.ts (scheme tolerated, trailing slash stripped).
+  if (env.SITE_URL) return env.SITE_URL;
+  // Vercel exposes this automatically, so a deployment gets correct canonical and
+  // Open Graph URLs with no configuration. Checked before the generic app URL.
   const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (env.SITE_URL) return env.SITE_URL.replace(/\/+$/, '');
-  if (vercelHost) return `https://${vercelHost.replace(/\/+$/, '')}`;
-  return env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '');
+  if (vercelHost) {
+    const host = vercelHost.trim().replace(/\/+$/, '');
+    return host.includes('://') ? host : `https://${host}`;
+  }
+  return env.NEXT_PUBLIC_APP_URL;
 }
 
 export function isIndexingAllowed(): boolean {
