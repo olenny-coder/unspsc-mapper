@@ -9,9 +9,44 @@ seeded. Recorded here so a reviewer can reproduce each step.
 |---|---|
 | `npm run lint` (`next lint --max-warnings=0`) | ✔ No ESLint warnings or errors |
 | `npm run typecheck` (`tsc --noEmit`) | clean |
-| `npm test` (Vitest) | 11 files, **213 tests passed** |
-| `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 11 pages, `ƒ Middleware 44 kB` |
+| `npm test` (Vitest) | 12 files, **239 tests passed** |
+| `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
+
+## SEO surfaces
+
+Verified against a production build (`next start`) with `ALLOW_INDEXING` at its default of false:
+
+```
+/robots.txt            200  text/plain             "User-Agent: *" + "Disallow: /" (no sitemap advertised)
+/sitemap.xml           200  application/xml        empty <urlset> — nothing advertised while not indexable
+/manifest.webmanifest  200  application/manifest+json
+/icon.svg              200  image/svg+xml
+/opengraph-image.svg   200  image/svg+xml          1200x630 social card
+/login                 200  text/html              title, description, canonical, og:*, twitter:*, JSON-LD
+```
+
+Rendered `<head>` on `/login`:
+
+```
+<title>Sign in · UNSPSC Spend Categorizer</title>
+<meta name="description" content="UNSPSC Spend Categorizer — AI spend classification with …">
+<meta name="robots" content="noindex, nofollow, nocache">
+<link rel="canonical" href="http://localhost:3000/login">
+<meta property="og:title|og:description|og:url|og:type">
+<meta name="twitter:card" content="summary_large_image"> plus twitter:title/description/image
+<meta name="theme-color" media="(prefers-color-scheme: light|dark)">   (duplicate plain tag removed)
+<link rel="icon" href="/icon.svg" type="image/svg+xml">                (missing favicon.ico reference removed)
+<script type="application/ld+json">SoftwareApplication + WebSite</script>
+  SoftwareApplication.featureList: 9 entries
+  aggregateRating: absent    offers: absent
+```
+
+26 unit tests cover the policy: indexing is **off by default**, a private page stays `noindex`
+even when global indexing is enabled, the sitemap is empty when not indexable, canonical URLs are
+absolute and correctly ordered (`SITE_URL` → Vercel host → `NEXT_PUBLIC_APP_URL`), and the
+structured data invents no ratings or prices.
+
 
 ## Theme and responsive audit (`scripts/visual-check.mjs`)
 
