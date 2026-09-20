@@ -260,99 +260,100 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 let cached: Env | null = null;
-
-/**
- * True while `next build` is running.
- *
- * Next sets `NEXT_PHASE=phase-production-build` for the build process. During a
- * build the environment is only needed for static metadata (canonical URLs, Open
- * Graph tags); the real configuration matters at *runtime*, in the serverless
- * function. Treating those differently is what stops one mistyped dashboard value
- * from turning a deploy into an unreadable build failure.
- */
-function isBuildPhase(): boolean {
-  return process.env.NEXT_PHASE === 'phase-production-build';
-}
+let cachedIssues: EnvIssue[] = [];
 
 type EnvIssue = { variable: string; problem: string };
 
 /**
- * Runtime message: one line per problem, variable name first.
+ * One compact line naming every variable that was ignored.
  *
- * This is thrown, so it is read once and legibility wins — but the variable name
- * still leads each line so it survives the tail-truncation that CI applies.
+ * Single-line on purpose. `getEnv()` is memoised per process, but it runs in very
+ * many short-lived processes — sixteen prerender workers during a build, and a
+ * fresh serverless instance per cold start — so a multi-line block repeated that
+ * often buries the variable names it exists to surface.
  */
 function formatIssues(issues: EnvIssue[]): string {
-  return [
-    'Invalid environment configuration — fix these environment variables:',
-    ...issues.map((entry) => `  ${entry.variable} — ${entry.problem}`),
-    '',
-    'Only DATABASE_URL is required; every other variable has a working default, so deleting the',
-    'offending one is a valid fix. In Vercel, saving a value is not enough — redeploy.',
-  ].join('\n');
-}
-
-/**
- * Build message: a single line, however many variables are wrong.
- *
- * `getEnv()` is memoised per process, but Next prerenders in a pool of short-lived
- * worker processes, so this fires once per worker — measured at sixteen for this
- * app. A multi-line block repeated sixteen times buries the very variable names it
- * exists to surface, so the build path stays on one line.
- */
-function formatIssuesInline(issues: EnvIssue[]): string {
   const noun = issues.length === 1 ? 'variable' : 'variables';
   const detail = issues.map((entry) => `${entry.variable} (${entry.problem})`).join('; ');
   return (
-    `[env] Ignoring ${issues.length} invalid environment ${noun} for this build: ${detail}. ` +
-    'Defaults are in use and the deploy can proceed; delete the offending variable to silence this. ' +
-    'In Vercel, saving a value is not enough — redeploy.'
+    `[env] Ignoring ${issues.length} unusable environment ${noun}: ${detail}. ` +
+    'Built-in defaults are in use, and the rest of the configuration is unaffected. Only ' +
+    'DATABASE_URL is required — deleting the offending variable is a valid fix. ' +
+    'In Vercel, saving a value is not enough: redeploy.'
   );
 }
 
 /**
- * Parse `process.env`.
+ * Re-parse with the offending keys removed.
  *
- * **During a build** an invalid value is reported as a loud warning and the
- * defaults are used, so a deployment always builds. Reference metadata is not
- * worth failing a deploy over, and the alternative — aborting with
- * `Failed to collect page data for /_not-found` — names nothing and cannot be
- * debugged from a truncated log.
+ * Stripping only the bad keys — rather than discarding the whole environment —
+ * means one mistyped value cannot silently reset every *other* setting to its
+ * default, which would be a far more confusing failure than the one it replaced.
+ */
+function parseIgnoring(issues: EnvIssue[]): Env {
+  const stripped = { ...process.env } as Record<string, unknown>;
+  for (const issue of issues) delete stripped[issue.variable];
+
+  const retry = envSchema.safeParse(stripped);
+  if (retry.success) return retry.data;
+
+  // Last resort: every field in this schema has a default, so this always parses.
+  return envSchema.parse({});
+}
+
+/**
+ * Parse `process.env`, degrading to defaults rather than failing.
  *
- * **At runtime** an invalid value throws, so a genuine misconfiguration surfaces
- * immediately and legibly on the first request rather than silently running with
- * the wrong settings.
+ * Every field that can fail validation here is a *tuning* value that has a working
+ * default (`SYNC_STALE_DAYS`, `LLM_BATCH_SIZE`, `ENRICH_CONCURRENCY`, `PORT`, …).
+ * None is worth an outage — and because `lib/auth.ts` imports this module, a throw
+ * here did not surface as a clear error: it killed the Edge middleware, so every
+ * gated route returned a bare `MIDDLEWARE_INVOCATION_FAILED`. Nine dashboard
+ * fields left at `0` took the entire deployment down with no explanation.
+ *
+ * The values that genuinely must be present — `DATABASE_URL`, the API keys, the
+ * shared secrets — are enforced where they are used, by the `require*` helpers
+ * below, so degrading here does not weaken them. The problems are not swallowed:
+ * they are logged and reported by `GET /api/health`.
  */
 export function getEnv(): Env {
   if (cached) return cached;
+
   const parsed = envSchema.safeParse(process.env);
-
-  if (!parsed.success) {
-    const issues = parsed.error.issues.map((issue) => ({
-      variable: issue.path.join('.') || '(root)',
-      problem: issue.message,
-    }));
-
-    if (isBuildPhase()) {
-      console.warn(formatIssuesInline(issues));
-      // Re-parse with only NODE_ENV so every default applies.
-      const fallback = envSchema.safeParse({ NODE_ENV: process.env.NODE_ENV });
-      if (fallback.success) {
-        cached = fallback.data;
-        return cached;
-      }
-    }
-
-    throw new ConfigError(formatIssues(issues), { issues: issues as unknown as Record<string, unknown> });
+  if (parsed.success) {
+    cachedIssues = [];
+    cached = parsed.data;
+    return cached;
   }
 
-  cached = parsed.data;
+  const issues: EnvIssue[] = parsed.error.issues.map((issue) => ({
+    variable: issue.path.join('.') || '(root)',
+    problem: issue.message,
+  }));
+
+  const resolved = parseIgnoring(issues);
+  console.warn(formatIssues(issues));
+
+  cachedIssues = issues;
+  cached = resolved;
   return cached;
+}
+
+/**
+ * Variables that were present but unusable, and so were replaced by defaults.
+ *
+ * Reported by `GET /api/health` so a misconfiguration is visible from outside the
+ * process, instead of only in a log nobody reads until something breaks.
+ */
+export function getEnvIssues(): EnvIssue[] {
+  getEnv();
+  return cachedIssues;
 }
 
 /** Test helper — drop the memoised env (used by `tests/env.test.ts`). */
 export function resetEnvCache(): void {
   cached = null;
+  cachedIssues = [];
 }
 
 export function isDatabaseConfigured(): boolean {

@@ -463,7 +463,7 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 │   ├── suppliers.csv               # 120+ suppliers incl. parents & subsidiaries
 │   ├── transactions.csv            # transaction-level shape (amounts aggregated)
 │   └── unspsc-v26-en.csv.gz        # 149,849 UNSPSC v26 codes (3.8 MB gz)
-├── tests/                          # 264 Vitest tests
+├── tests/                          # 268 Vitest tests
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
 ├── Dockerfile.worker
@@ -916,7 +916,7 @@ npx tsx scripts/smoke-offline.ts   # end-to-end pipeline check without a databas
 | `tests/upload.test.ts` | Delimiter detection, CSV parsing, sample-file integrity, taxonomy seed mapping |
 | `tests/auth.test.ts` | Session-token signing/expiry/tamper resistance, credential extraction, public-path allowlist, fail-closed rules |
 | `tests/theme.test.ts` | Theme resolution parity between the pre-paint boot script and the React provider, token sanity, script syntax |
-| `tests/env.test.ts` | **Build vs runtime env policy**: a bad value warns and defaults during a build but throws at runtime naming the variable; scheme-less URLs; placeholder handling |
+| `tests/env.test.ts` | **Environment policy**: an unusable tuning value falls back to its default without disturbing the rest of the configuration, `0` is rejected where the minimum is 1, `/api/health` can report what was ignored, and missing credentials still throw; scheme-less URLs; placeholder handling |
 | `tests/vercel-origin.test.ts` | The Vercel origin guard: bare host kept, full URL narrowed to its host, unusable value dropped, variables Next.js owns |
 
 Nothing in the suite needs network access or a database: the hierarchy, merge, prompt, cron and
@@ -962,14 +962,13 @@ misconfiguration can report `/_not-found`, `/login` or `/`.
 
 Two guards now stop that:
 
-* `lib/env.ts` validates strictly **at runtime** but only **warns during a build**, so an unusable
-  value falls back to its default and the deploy proceeds. The build log names the variable:
-  `[env] Ignoring 1 invalid environment variable for this build: SYNC_STALE_DAYS (expected an
-  integer, received "30 days").`
+* `lib/env.ts` never throws on an unusable *tuning* value. It substitutes that variable's default,
+  leaves every other setting alone, and names what it ignored in one log line:
+  `[env] Ignoring 1 unusable environment variable: SYNC_STALE_DAYS (expected 1..3650, received 0).`
 * `lib/vercel-origin.mjs` repairs or drops a malformed `VERCEL_PROJECT_PRODUCTION_URL`,
   `VERCEL_URL` or `VERCEL_BRANCH_URL` before Next.js reads them (`next.config.mjs` runs it).
 
-**So: read the `[env]` line in the build log and delete that variable.** Only `DATABASE_URL` is
+**So: read the `[env]` line, or `GET /api/health`, and delete that variable.** Only `DATABASE_URL` is
 required:
 
 ```
@@ -979,8 +978,8 @@ Delete:  everything else
 
 `CLASSIFY_CONFIDENCE_THRESHOLD`, `SYNC_STALE_DAYS`, `LLM_BATCH_SIZE`, `ENRICH_PROVIDER`,
 `CLASSIFY_MODEL_STRATEGY`, `SITE_URL` and `APP_ORIGIN` all have working defaults and are safe to
-remove entirely. The build succeeds either way now, but a bad value still throws on the first
-request at runtime, so deleting it is the real fix rather than a workaround.
+remove entirely. The app stays up either way, which is why the misconfiguration is reported rather
+than thrown — check `/api/health`, whose `configuration` check names every value that was ignored.
 
 Or reproduce locally, which prints a pass/fail matrix for twenty input shapes:
 
@@ -992,6 +991,34 @@ Do **not** re-push to fix an environment *value*. The value lives in the Vercel 
 repo — and environment variables are read at build time, so changing one does not retroactively fix
 an existing deployment. Use **Deployments → ⋯ → Redeploy** after saving. (The guards above are code,
 so they do need the usual one push before they take effect.)
+
+### If the whole deployment returns 500 and nothing works
+
+`MIDDLEWARE_INVOCATION_FAILED` on every route except `/login` and static assets means the **Edge
+middleware** threw. It is the first thing to run, so nothing else gets a chance to report anything —
+and because `lib/auth.ts` imports `lib/env.ts`, an invalid environment value used to reach it and
+kill every gated route at once. This is what nine numeric variables left at `0` did to a live
+deployment.
+
+Two changes make that impossible to hit blind:
+
+* `lib/env.ts` degrades instead of throwing, so the middleware no longer has anything to propagate;
+* `middleware.ts` catches anything unexpected anyway and fails closed with a 503 that states the
+  reason and points at `/api/health`, rather than letting the platform return a bare crash.
+
+Diagnose from outside with the health endpoint, which names the offending variables:
+
+```bash
+curl -s https://your-app.vercel.app/api/health | jq '.checks[] | select(.name=="configuration")'
+```
+
+The nine values that caused this are `ENRICH_CONCURRENCY`, `SYNC_STALE_DAYS`, `SYNC_BATCH_SIZE`,
+`SYNC_MAX_BATCHES_PER_RUN`, `LLM_BATCH_SIZE`, `LLM_MAX_REQUESTS_PER_MINUTE`,
+`LLM_MAX_REQUESTS_PER_DAY_70B`, `LLM_MAX_REQUESTS_PER_DAY_8B` and `PORT`. All require a value of at
+least `1`, so a `0` means "unset" and is replaced by the default. Delete them to silence the warning.
+
+The same policy protects the Render worker, which reads the same module — so a `0` in a Render
+environment variable degrades there too rather than stopping the scheduler.
 
 | Symptom | Cause | Fix |
 |---|---|---|

@@ -13,7 +13,7 @@
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { dynamic } from '@/lib/api';
-import { getEnv, isEnrichmentConfigured, isGroqConfigured } from '@/lib/env';
+import { getEnv, getEnvIssues, isEnrichmentConfigured, isGroqConfigured } from '@/lib/env';
 import { getDb } from '@/db/client';
 import { suppliers, unspscCodes } from '@/db/schema';
 import { sql } from 'drizzle-orm';
@@ -50,6 +50,21 @@ export async function GET(request: NextRequest) {
   const started = Date.now();
 
   const checks: DependencyStatus[] = [];
+
+  // Unusable environment values are replaced by defaults rather than failing the
+  // request, which keeps the app up but would otherwise hide the problem away in
+  // a log. Reporting them here makes a misconfiguration visible from outside the
+  // process — and `?strict=true` turns it into a 503 so a monitor notices.
+  const envIssues = getEnvIssues();
+  checks.push({
+    name: 'configuration',
+    ok: envIssues.length === 0,
+    detail: envIssues.length
+      ? `${envIssues.length} unusable environment ${envIssues.length === 1 ? 'variable' : 'variables'} ignored: ${envIssues
+          .map((issue) => `${issue.variable} (${issue.problem})`)
+          .join('; ')}`
+      : 'all configured values are valid',
+  });
 
   const database = await timed('database', async () => {
     const db = getDb();

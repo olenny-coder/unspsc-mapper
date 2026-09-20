@@ -9,7 +9,7 @@ seeded. Recorded here so a reviewer can reproduce each step.
 |---|---|
 | `npm run lint` (`next lint --max-warnings=0`) | ✔ No ESLint warnings or errors |
 | `npm run typecheck` (`tsc --noEmit`) | clean |
-| `npm test` (Vitest) | 14 files, **264 tests passed** |
+| `npm test` (Vitest) | 14 files, **268 tests passed** |
 | `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
 
@@ -29,8 +29,52 @@ from a truncated log. Every row below is a real invocation, not a projection.
 | `DATABASE_URL` empty, or not a URL | exit 0, runtime error on first request | exit 0, same |
 | All of the above at once | exit 1 | exit 0 — 33 routes generated, 0 `Invalid URL`, 0 page-data failures |
 
-The guards are covered by `tests/env.test.ts` and `tests/vercel-origin.test.ts` (20 tests), so the
-build cannot silently regress to failing on configuration.
+The guards are covered by `tests/env.test.ts` and `tests/vercel-origin.test.ts`, so the build cannot
+silently regress to failing on configuration.
+
+### Runtime, with the live deployment's exact environment
+
+The production server was then started with the nine numeric variables that broke the Vercel
+deployment set to `0`, to confirm the failure is gone end to end rather than only at build time.
+Every row is a real request against `next start`.
+
+| Request | On the live deployment | After |
+|---|---|---|
+| `GET /` | 500 `MIDDLEWARE_INVOCATION_FAILED` | 307 → `/login` |
+| `GET /upload` | 500 `MIDDLEWARE_INVOCATION_FAILED` | 307 → `/login?next=%2Fupload` |
+| `GET /api/health` | 500, empty body | **200**, `ok: true`, `configuration` check lists all eight ignored variables, `degraded: true` |
+| `GET /api/auth/session` | 500 with the `ConfigError` envelope | 200 |
+| `GET /api/audit` | 500 | 401 with the standard JSON envelope |
+| `GET /` , `/upload`, `/settings`, `/audit`, `/reports` with a bearer secret | 500 | **200** — 43–60 kB of rendered HTML |
+| `GET /nonexistent-xyz` with a bearer secret | 500 | 404, custom page |
+
+The application stays fully usable, and the misconfiguration is still reported rather than hidden.
+
+### Render worker readiness
+
+The worker entry point was run exactly as Render runs it (`npm run worker:start`), against the same
+database:
+
+```
+[worker] starting UNSPSC spend categorizer worker { "environment": "production", "cronSync": "0 3 * * *", ... }
+[worker] database connection verified
+[worker] health server listening on port 3200
+[worker] job sync scheduled   { "cron": "0 3 * * *",   "next": "2026-09-21T03:00:00.000Z" }
+[worker] job report scheduled { "cron": "0 6 * * 1",   "next": "2026-09-21T06:00:00.000Z" }
+[worker] no previous run recorded; skipping catch-up (first deployment)
+```
+
+| Endpoint | Result |
+|---|---|
+| `GET /health` (Render's `healthCheckPath`) | 200 — service up, both jobs scheduled with their next run time |
+| `GET /ready` | 200 — `database: reachable` |
+| `GET /status` without credentials | 401 |
+| `GET /status` with `WORKER_SECRET` | 200 — full scheduler state |
+| `GET /run` | 404 — POST-only, as intended |
+
+`render.yaml` runs `npm ci --omit=dev`, so `tsx` (which executes the TypeScript worker directly) and
+`dotenv` must be **production** dependencies. Verified: `tsx@4.23.13` and `dotenv@16.6.1` both
+resolve under `npm ls --omit=dev`.
 
 ## SEO surfaces
 
@@ -276,7 +320,9 @@ Keep-alive script:
 | Visual harness: `elementFromPoint` clickable-area probe | Reported 1×1 for every control (delegated clicks resolve to an ancestor), producing false failures | Read `::after` inset geometry from computed styles and attribute the hit area to a checkbox's `<label>` |
 | Checkboxes, switches and sort headers were 16–22px | Below the WCAG 2.5.8 24px minimum; hard to tap on mobile | 32–36px padded hit areas via wrapper elements and pseudo-elements, without changing the visual density |
 | **Build failed on Vercel as `Failed to collect page data for /_not-found`** | The whole deploy was blocked by a message naming no file, no variable and no cause — it cost three redeploys to not diagnose | `app/layout.tsx` resolves metadata defensively; the real cause was that `getEnv()` threw while the root layout was evaluated during page-data collection. Reproduced locally by reverting the guard: exit 1, and the route named varies by build order (`/login` locally, `/_not-found` on Vercel) |
-| Any invalid environment value aborted a deployment | A typo in a dashboard field (`CLASSIFY_CONFIDENCE_THRESHOLD=70`, `SYNC_STALE_DAYS=30 days`) failed the build with an unreadable message | `getEnv()` is strict at runtime but warns and falls back to defaults during a build (`isBuildPhase()`), naming each bad variable in one compact log line; `app/not-found.tsx` added so the route has an explicit owner |
+| Any invalid environment value aborted a deployment | A typo in a dashboard field (`CLASSIFY_CONFIDENCE_THRESHOLD=70`, `SYNC_STALE_DAYS=30 days`) failed the build with an unreadable message | `getEnv()` substitutes the default for the offending variable, leaves the rest of the configuration intact, and names what it ignored in one compact log line; `app/not-found.tsx` added so the route has an explicit owner |
+| **`MIDDLEWARE_INVOCATION_FAILED` on every route of a live deployment** | Nine numeric variables left at `0` in the Vercel dashboard reached `getEnv()` through `lib/auth.ts` and killed the Edge middleware: `/`, `/upload`, `/audit`, `/reports` and every API route returned a bare 500, while `/login` and static assets kept working — so the app looked deployed but was entirely unusable. `GET /api/health` returned an empty 500, hiding the reason; only `/api/auth/session` leaked it | `getEnv()` no longer throws for tuning values, so the middleware has nothing to propagate. `middleware.ts` additionally catches anything unexpected and fails closed with a 503 stating the reason, instead of letting the platform return an opaque crash |
+| A misconfiguration that no longer throws became invisible | Degrading silently would trade a loud outage for a quiet wrong setting | `getEnvIssues()` records what was ignored and `GET /api/health` reports it as a `configuration` check naming every variable, so the problem is visible from outside the process |
 | **~36 × `TypeError: Invalid URL` during the Vercel build, exit 1** | Unfixable from app code as previously documented: Next.js itself runs `new URL(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`)` unguarded in `lib/metadata/resolvers/resolve-url.js`, and does so even when the app supplies its own `metadataBase` | `lib/vercel-origin.mjs` repairs a full URL to its host and drops an unusable value; `next.config.mjs` runs it before prerender workers are forked, so the correction is inherited. Verified: the same input that produced exit 1 and 36 errors now builds clean |
 | Environment warning repeated once per prerender worker | Sixteen multi-line blocks buried the variable names they existed to surface | The build path emits a single compact line per process; memoisation keeps it to one call per process. Locked in by a test asserting no newline and exactly one call |
 
