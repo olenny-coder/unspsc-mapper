@@ -1,5 +1,5 @@
 {
-  "name": "unspsc-spend-categorizer",
+  "name": "unspsc-mapper",
   "version": "1.0.0",
   "private": true,
   "description": "Auto-categorize procurement spend into 8-digit UNSPSC codes using supplier enrichment plus LLM classification, with parent/subsidiary mapping, human review, live supplier sync, and CSV/PDF reporting. Runs on Neon, Render and Vercel free tiers.",
@@ -19,13 +19,13 @@
     "neon",
     "postgres"
   ],
-  "homepage": "https://github.com/olenny-coder/unspsc-spend-categorizer#readme",
+  "homepage": "https://github.com/olenny-coder/unspsc-mapper#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/olenny-coder/unspsc-spend-categorizer.git"
+    "url": "git+https://github.com/olenny-coder/unspsc-mapper.git"
   },
   "bugs": {
-    "url": "https://github.com/olenny-coder/unspsc-spend-categorizer/issues"
+    "url": "https://github.com/olenny-coder/unspsc-mapper/issues"
   },
   "engines": {
     "node": ">=20.11.0"

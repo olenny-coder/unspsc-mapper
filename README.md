@@ -163,8 +163,8 @@ resolves the `@/*` path aliases, so there is no second build artefact to keep in
 ## Quick start (5 minutes)
 
 ```bash
-git clone https://github.com/<you>/unspsc-spend-categorizer.git
-cd unspsc-spend-categorizer
+git clone https://github.com/olenny-coder/unspsc-mapper.git
+cd unspsc-mapper
 npm install
 
 # 1. Database (docker compose, or paste a Neon URL instead)
@@ -704,7 +704,7 @@ git init
 git add .
 git commit -m "feat: UNSPSC spend categorizer"
 git branch -M main
-git remote add origin https://github.com/<you>/unspsc-spend-categorizer.git
+git remote add origin https://github.com/olenny-coder/unspsc-mapper.git
 git push -u origin main
 ```
 

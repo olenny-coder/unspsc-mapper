@@ -267,7 +267,7 @@ export function softwareApplicationJsonLd(): Record<string, unknown> {
     programmingLanguage: ['TypeScript'],
     runtimePlatform: ['Node.js', 'Vercel', 'Render'],
     softwareRequirements: 'PostgreSQL (Neon-compatible), Node.js 20+',
-    codeRepository: 'https://github.com/olenny-coder/unspsc-spend-categorizer',
+    codeRepository: 'https://github.com/olenny-coder/unspsc-mapper',
   };
 }
 
