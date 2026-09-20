@@ -17,6 +17,7 @@
  *    runs a missed slot on wake-up;
  *  - a single process handles both HTTP and the scheduler.
  */
+import '@/lib/env-node';
 import { getEnv } from '@/lib/env';
 import { serializeError } from '@/lib/errors';
 import { closeDb, getDb } from '@/db/client';

@@ -7,30 +7,24 @@
  * secrets present (important for CI), while failing loudly at runtime if a
  * feature is used without its key.
  */
-import { config as loadDotenv } from 'dotenv';
 import { z } from 'zod';
 import { ConfigError } from '@/lib/errors';
 
-/**
- * Load `.env.local` / `.env` once, before anything reads `process.env`.
+/*
+ * IMPORTANT — this module is imported by `middleware.ts` (via `lib/auth.ts`) and
+ * therefore runs in the Edge Runtime. It must not reach for Node APIs, `eval`,
+ * or `dotenv`:
  *
- * Next.js does this itself for the app, but standalone scripts, the Render
- * worker and the Vitest process do not — and a script that silently sees no
- * `DATABASE_URL` is a confusing failure. dotenv never overwrites values that are
- * already set, so platform-provided variables always win.
+ *   - a static `import 'dotenv'` pulls in `process.cwd()` calls, which the Edge
+ *     Runtime rejects with a stream of warnings;
+ *   - `eval('require')` to hide it fails the build outright with
+ *     "Dynamic Code Evaluation ... not allowed in Edge Runtime".
+ *
+ * Loading `.env.local` for standalone scripts and the Render worker therefore
+ * lives in `lib/env-node.ts`, which those entry points import explicitly. Next.js
+ * already loads the env files for the app and middleware, so nothing is lost.
  */
-let envFilesLoaded = false;
-function loadEnvFiles(): void {
-  if (envFilesLoaded) return;
-  envFilesLoaded = true;
-  try {
-    loadDotenv({ path: '.env.local' });
-    loadDotenv({ path: '.env' });
-  } catch {
-    // A missing dotenv or missing files is not fatal: production platforms inject
-    // real environment variables.
-  }
-}
+
 
 const boolFromString = (defaultValue: boolean) =>
   z
@@ -98,10 +92,7 @@ const urlFromString = (fallback: string) =>
     .transform((value, ctx) => {
       const raw = value.trim();
       if (!raw) return fallback;
-      // A dashboard that stored the literal string wins over a missing value:
-      // `NEXT_PUBLIC_APP_URL=undefined` would otherwise parse as http://undefined
-      // and silently produce broken canonical and Open Graph URLs.
-      if (['undefined', 'null', 'none', 'false'].includes(raw.toLowerCase())) return fallback;
+      if (isPlaceholder(raw)) return fallback;
       const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
       try {
         const parsed = new URL(candidate);
@@ -117,6 +108,49 @@ const urlFromString = (fallback: string) =>
       }
     });
 
+/**
+ * Strings that appear when someone copies a placeholder out of a dashboard or a
+ * log line. Treating these as "unset" is safer than parsing them: a literal
+ * `undefined` would otherwise become `http://undefined`.
+ */
+function isPlaceholder(value: string): boolean {
+  return ['undefined', 'null', 'none', 'false', '""', "''", ':', 'http://', 'https://'].includes(
+    value.trim().toLowerCase(),
+  );
+}
+
+/**
+ * Case-insensitive enum.
+ *
+ * Dashboards and copy-paste produce `Tiered` or `CompanyEnrich`, and rejecting
+ * those with a hard build failure is hostile when the intent is unambiguous.
+ * Values are lower-cased before matching.
+ *
+ * The type parameter must be given explicitly: TypeScript cannot infer a literal
+ * union through a runtime `includes` lookup, so without it the output widens to
+ * `string | undefined` and every consumer loses its narrow type.
+ *
+ * @example enumFromString<'tiered' | 'bulk'>(['tiered', 'bulk'], 'tiered')
+ */
+const enumFromString = <T extends string>(
+  values: readonly [T, ...T[]],
+  fallback: T,
+): z.ZodType<T, z.ZodTypeDef, unknown> =>
+  z
+    .string()
+    .optional()
+    .transform((value, ctx): T => {
+      const raw = (value ?? '').trim();
+      if (!raw) return fallback;
+      const lowered = raw.toLowerCase();
+      if ((values as readonly string[]).includes(lowered)) return lowered as T;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `expected one of ${values.join(' | ')} (case-insensitive), received "${value}"`,
+      });
+      return fallback;
+    }) as unknown as z.ZodType<T, z.ZodTypeDef, unknown>;
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -128,7 +162,7 @@ const envSchema = z.object({
   GROQ_MODEL_ACCURATE: z.string().default('llama-3.3-70b-versatile'),
   GROQ_MODEL_BULK: z.string().default('llama-3.1-8b-instant'),
 
-  ENRICH_PROVIDER: z.enum(['companyenrich', 'contextdev', 'none']).default('companyenrich'),
+  ENRICH_PROVIDER: enumFromString<'companyenrich' | 'contextdev' | 'none'>(['companyenrich', 'contextdev', 'none'], 'companyenrich'),
   ENRICH_API_KEY: optionalString,
   ENRICH_BASE_URL: optionalString,
   ENRICH_MONTHLY_CREDIT_LIMIT: intFromString(500, 0, 1_000_000),
@@ -142,7 +176,34 @@ const envSchema = z.object({
   /** Set to 'false' to disable the development auth bypass (never in production). */
   ALLOW_UNAUTHENTICATED_DEV: boolFromString(true),
 
-  NEXT_PUBLIC_APP_URL: urlFromString('http://localhost:3000'),
+  /**
+   * Public origin, used for canonical URLs, the sitemap and Open Graph tags.
+   *
+   * Deliberately NOT `NEXT_PUBLIC_APP_URL`: Next.js replaces every `NEXT_PUBLIC_*`
+   * reference with the literal value present at build time, so such a variable is
+   * not reliably readable at runtime and cannot be varied in tests. It is still
+   * honoured as a fallback for backwards compatibility.
+   */
+  APP_ORIGIN: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      const raw = (value ?? '').trim();
+      if (!raw) return undefined;
+      if (isPlaceholder(raw)) return undefined;
+      const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+      try {
+        const parsed = new URL(candidate);
+        if (!parsed.hostname) throw new Error('missing hostname');
+        return candidate.replace(/\/+$/, '');
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `expected an absolute URL such as "https://your-domain.com", received "${value}"`,
+        });
+        return z.NEVER;
+      }
+    }),
   /** Canonical public origin used for SEO metadata, sitemap and OG URLs. */
   SITE_URL: z
     .string()
@@ -179,7 +240,7 @@ const envSchema = z.object({
   SYNC_BATCH_SIZE: intFromString(25, 1, 500),
   SYNC_MAX_BATCHES_PER_RUN: intFromString(12, 1, 1000),
   CLASSIFY_CONFIDENCE_THRESHOLD: floatFromString(0.7),
-  CLASSIFY_MODEL_STRATEGY: z.enum(['tiered', 'accurate', 'bulk']).default('tiered'),
+  CLASSIFY_MODEL_STRATEGY: enumFromString<'tiered' | 'accurate' | 'bulk'>(['tiered', 'accurate', 'bulk'], 'tiered'),
   LLM_BATCH_SIZE: intFromString(10, 1, 10),
   LLM_MAX_REQUESTS_PER_MINUTE: intFromString(25, 1, 1000),
   LLM_MAX_REQUESTS_PER_DAY_70B: intFromString(1000, 1, 100_000),
@@ -206,7 +267,6 @@ let cached: Env | null = null;
  */
 export function getEnv(): Env {
   if (cached) return cached;
-  loadEnvFiles();
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
     const issues = parsed.error.issues

@@ -946,10 +946,42 @@ taxonomy seeded:
 
 ## Troubleshooting
 
+### If the Vercel build fails with no useful message
+
+`Failed to collect page data for /_not-found` means the root layout threw while its metadata was
+evaluated — before any page rendered. `app/layout.tsx` resolves the public origin at module scope,
+so a bad environment value aborts the whole deploy with a message that names nothing.
+
+**Find the culprit in one step — delete the optional variables.** Only `DATABASE_URL` is required:
+
+```
+Keep:    DATABASE_URL, DASHBOARD_SECRET, WORKER_SECRET, GROQ_API_KEY
+Delete:  everything else
+```
+
+`CLASSIFY_CONFIDENCE_THRESHOLD`, `SYNC_STALE_DAYS`, `LLM_BATCH_SIZE`, `ENRICH_PROVIDER`,
+`CLASSIFY_MODEL_STRATEGY`, `SITE_URL` and `APP_ORIGIN` all have working defaults and are safe to
+remove entirely. Redeploy; if it succeeds, add them back one at a time.
+
+Or reproduce locally, which prints a pass/fail matrix for twenty input shapes:
+
+```bash
+npx tsx scripts/diagnose-build.ts
+```
+
+Do **not** re-push to fix this. The value lives in the Vercel dashboard, not the repo — and
+environment variables are read at build time, so changing one does not retroactively fix an
+existing deployment. Use **Deployments → ⋯ → Redeploy** after saving.
+
 | Symptom | Cause | Fix |
 |---|---|---|
 | Dev server serves 500 with `Unexpected token 'div'. Expected jsx identifier` for a file that builds fine | Corrupt webpack cache in `.next/` (common after a killed process), not a code error | Stop the server, delete `.next`, restart. If `npm run build` and `npm run typecheck` both pass, the source is fine. |
 | Visual audit reports a mobile viewport as ~720px | `window.innerWidth` disagrees with the CSS viewport in headless Chromium | The harness measures `document.documentElement.clientWidth` and asserts it, so a wrong width fails loudly rather than silently testing desktop layout. |
+| **Vercel: `Failed to collect page data for /_not-found`** | An environment variable is aborting the build. Three distinct causes — see the table below | Diagnose locally with `npx tsx scripts/diagnose-build.ts`, which prints a pass/fail matrix for every input shape |
+| `Invalid environment configuration: X: expected 0..1, received "70"` | `CLASSIFY_CONFIDENCE_THRESHOLD` is a probability, not a percentage | Set `0.7`, or delete the variable (it defaults to `0.7`) |
+| `Invalid environment configuration: X: expected an integer, received "30 days"` | A numeric variable carries a unit suffix | Use `30`, not `30 days` |
+| ~36 × `TypeError: Invalid URL` during the Vercel build, exit 1 | **Next.js itself**, not this app: Next reads `VERCEL_PROJECT_PRODUCTION_URL` directly for `metadataBase`, so a value like `:` or one containing spaces breaks it before any app code runs | Set `SITE_URL` to the absolute origin (the documented override) or unset the offending variable — no code change can prevent this one |
+| `Dynamic Code Evaluation ... not allowed in Edge Runtime` | Something in the middleware graph reached for `eval`/`require` | Fixed: env-file loading now lives in `lib/env-node.ts`, which middleware never imports |
 | `DATABASE_URL is not configured` | Missing env var | Add it to `.env.local` (dev) or the Vercel/Render dashboard. |
 | `/api/health` shows `database: ok: false` | Wrong connection string, or Neon suspended | Use the **pooled** string with `?sslmode=require`; open the Neon console to wake the project. |
 | Classification returns "GROQ_API_KEY is not set" | Key missing in that environment | Set it in Vercel **and** Render — the worker classifies independently of the UI. |

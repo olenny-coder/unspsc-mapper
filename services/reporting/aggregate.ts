@@ -10,6 +10,7 @@ import { getEnv } from '@/lib/env';
 import { roundTo } from '@/lib/normalize';
 import { describeFilters, parseReportFilters, type ReportFilters } from '@/lib/validation';
 import type { DbLike } from '@/db/client';
+import { siteUrl } from '@/lib/seo';
 import {
   buildHierarchy,
   rollupByParent,
@@ -313,7 +314,10 @@ export async function buildReportDataset(options: BuildReportOptions = {}): Prom
       dateRange: { from: filters.from ?? null, to: filters.to ?? null },
       rollup: filters.rollup ?? 'supplier',
       taxonomyVersion: env.UNSPSC_VERSION,
-      appUrl: env.NEXT_PUBLIC_APP_URL,
+      // Use the shared resolver rather than reading an env var directly: this is
+      // the same origin the canonical URLs and Open Graph tags use, and it already
+      // handles Vercel's automatic host and malformed values.
+      appUrl: siteUrl(),
     },
     summary,
     segments,

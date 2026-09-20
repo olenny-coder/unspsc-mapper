@@ -58,23 +58,77 @@ export const SITE_KEYWORDS = [
 ] as const;
 
 /**
+ * Resolve a string to an absolute origin, or null when it cannot be one.
+ *
+ * Never throws. `metadataBase: new URL(...)` in the root metadata is evaluated
+ * while Next collects page data, so a single malformed value here aborts the
+ * whole build with `Failed to collect page data for /_not-found` and a bare
+ * `TypeError: Invalid URL` that names nothing.
+ */
+export function toAbsoluteOrigin(value: string | undefined): string | null {
+  const raw = (value ?? '').trim();
+  if (!raw) return null;
+  if (/\s/.test(raw)) return null;
+
+  /*
+   * Strip an optional scheme, then inspect the host on its own.
+   *
+   * Doing this in one step (rather than testing the full string with a regex)
+   * avoids a trap: `http://localhost:4321` does not match a "bare host" pattern
+   * because of the scheme, so a localhost origin was being rejected and silently
+   * replaced by the localhost *default* — which looked like the variable was
+   * being ignored.
+   */
+  const withoutScheme = raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  const hostPart = withoutScheme.split('/')[0] ?? '';
+  if (!hostPart) return null;
+
+  // Bare schemes and placeholders that get copied out of dashboards.
+  const lowered = hostPart.toLowerCase();
+  if (['undefined', 'null', 'none', 'false', '""', "''", ':', 'http', 'https'].includes(lowered)) return null;
+
+  // A localhost/loopback origin has no dot but is legitimate.
+  const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?$/i.test(hostPart);
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+  const candidate = hasScheme ? raw : `${isLocal ? 'http' : 'https'}://${raw}`;
+
+  try {
+    const parsed = new URL(candidate);
+    if (!parsed.hostname) return null;
+    // A public origin needs a dot (or a bracketed IPv6 host) — this rejects
+    // nonsense like "https://http/" that would otherwise parse.
+    const host = parsed.hostname;
+    if (!host.includes('.') && !isLocal && !host.startsWith('[')) return null;
+    return candidate.replace(/\/+$/, '');
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Public origin for canonical URLs.
  *
- * Vercel exposes `VERCEL_PROJECT_PRODUCTION_URL` automatically, so a deployment
- * gets correct canonical/OG URLs without extra configuration.
+ * Resolution order:
+ *   1. `SITE_URL`                              — explicit, recommended for custom domains
+ *   2. `VERCEL_PROJECT_PRODUCTION_URL`         — supplied automatically by Vercel
+ *   3. `APP_ORIGIN`                            — explicit, for other hosts
+ *   4. `NEXT_PUBLIC_APP_URL`                   — legacy fallback (statically inlined)
+ *   5. `http://localhost:3000`
+ *
+ * Every candidate goes through `toAbsoluteOrigin`, so a malformed value degrades
+ * to the next option instead of crashing the build. A slightly wrong canonical
+ * URL is a far better outcome than a failed deploy — and the failure this guards
+ * against (`Failed to collect page data for /_not-found`) gives no useful message.
  */
 export function siteUrl(): string {
   const env = getEnv();
-  // Already normalised by lib/env.ts (scheme tolerated, trailing slash stripped).
-  if (env.SITE_URL) return env.SITE_URL;
-  // Vercel exposes this automatically, so a deployment gets correct canonical and
-  // Open Graph URLs with no configuration. Checked before the generic app URL.
-  const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (vercelHost) {
-    const host = vercelHost.trim().replace(/\/+$/, '');
-    return host.includes('://') ? host : `https://${host}`;
-  }
-  return env.NEXT_PUBLIC_APP_URL;
+  return (
+    toAbsoluteOrigin(env.SITE_URL) ??
+    toAbsoluteOrigin(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
+    toAbsoluteOrigin(env.APP_ORIGIN) ??
+    toAbsoluteOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
+    'http://localhost:3000'
+  );
 }
 
 export function isIndexingAllowed(): boolean {

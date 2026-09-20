@@ -25,7 +25,20 @@ import sitemap from '@/app/sitemap';
 
 const mutableEnv = process.env as Record<string, string | undefined>;
 
-const TOUCHED = ['SITE_URL', 'ALLOW_INDEXING', 'NEXT_PUBLIC_APP_URL', 'VERCEL_PROJECT_PRODUCTION_URL'] as const;
+/**
+ * Environment keys these tests vary.
+ *
+ * `APP_ORIGIN` rather than `NEXT_PUBLIC_APP_URL`: Next.js replaces every
+ * `NEXT_PUBLIC_*` reference with the literal present at build time, so such a
+ * variable cannot be read back at runtime and cannot be varied in a test.
+ */
+const TOUCHED = [
+  'SITE_URL',
+  'ALLOW_INDEXING',
+  'APP_ORIGIN',
+  'NEXT_PUBLIC_APP_URL',
+  'VERCEL_PROJECT_PRODUCTION_URL',
+] as const;
 
 beforeEach(() => {
   for (const key of TOUCHED) delete mutableEnv[key];
@@ -73,19 +86,24 @@ describe('siteUrl', () => {
     expect(siteUrl()).toBe('https://unspsc.vercel.app');
   });
 
-  it('falls back to NEXT_PUBLIC_APP_URL last', () => {
-    setEnv({ NEXT_PUBLIC_APP_URL: 'http://localhost:4321' });
+  it('falls back to APP_ORIGIN when SITE_URL and the Vercel host are unset', () => {
+    setEnv({ APP_ORIGIN: 'http://localhost:4321' });
     expect(siteUrl()).toBe('http://localhost:4321');
+  });
+
+  it('prefers SITE_URL over the Vercel host', () => {
+    setEnv({ SITE_URL: 'https://custom.example.com', VERCEL_PROJECT_PRODUCTION_URL: 'preview.vercel.app' });
+    expect(siteUrl()).toBe('https://custom.example.com');
   });
 
   /*
    * Regression tests for a real Vercel build failure:
    * "Failed to collect page data for /_not-found" caused by `new URL()` throwing
-   * on a scheme-less NEXT_PUBLIC_APP_URL. That surfaced as a bare
-   * `TypeError: Invalid URL` with no indication of which variable was at fault.
+   * on a scheme-less origin. That surfaced as a bare `TypeError: Invalid URL`
+   * with no indication of which variable was at fault.
    */
   it('tolerates a missing scheme instead of crashing the build', () => {
-    setEnv({ NEXT_PUBLIC_APP_URL: 'unspsc-mapper.vercel.app' });
+    setEnv({ APP_ORIGIN: 'unspsc-mapper.vercel.app' });
     expect(siteUrl()).toBe('http://unspsc-mapper.vercel.app');
   });
 
@@ -96,7 +114,7 @@ describe('siteUrl', () => {
 
   it('treats a literal "undefined" string as unset', () => {
     // A dashboard that stored the string would otherwise yield http://undefined.
-    setEnv({ NEXT_PUBLIC_APP_URL: 'undefined' });
+    setEnv({ APP_ORIGIN: 'undefined' });
     expect(siteUrl()).toBe('http://localhost:3000');
   });
 
