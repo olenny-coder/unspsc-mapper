@@ -144,6 +144,51 @@ describe('getEnvIssues', () => {
   });
 });
 
+describe('blank values count as unset', () => {
+  // zod's `.default()` applies only to `undefined`, so before this was handled a
+  // variable created but left empty in a dashboard produced `''` or `0` instead of
+  // its default — an empty Groq model name that the API rejects, and a zero budget
+  // reserve. Reported by a live deployment's /api/health: `groq: "configured ( / )"`.
+  it('treats an empty string as unset rather than as an empty value', () => {
+    mutableEnv.GROQ_MODEL_ACCURATE = '';
+    mutableEnv.GROQ_MODEL_BULK = '';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const env = getEnv();
+
+    expect(env.GROQ_MODEL_ACCURATE).toBe('llama-3.3-70b-versatile');
+    expect(env.GROQ_MODEL_BULK).toBe('llama-3.1-8b-instant');
+    // A blank field means "not set", so it is not a misconfiguration to report.
+    expect(getEnvIssues()).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('treats whitespace as unset too', () => {
+    mutableEnv.GROQ_MODEL_ACCURATE = '   ';
+    expect(getEnv().GROQ_MODEL_ACCURATE).toBe('llama-3.3-70b-versatile');
+  });
+
+  it('restores the default for a blank numeric field instead of reading it as 0', () => {
+    mutableEnv.LLM_BATCH_SIZE = '';
+    mutableEnv.SYNC_STALE_DAYS = '';
+
+    expect(getEnv().LLM_BATCH_SIZE).toBe(10);
+    expect(getEnv().SYNC_STALE_DAYS).toBe(30);
+  });
+
+  it('keeps an explicit 0 where 0 is allowed, but not where it is not', () => {
+    // 0 means "no reserve" and is meaningful; 0 batches per run is not.
+    mutableEnv.CLASSIFY_CONFIDENCE_THRESHOLD = '0';
+    mutableEnv.LLM_BATCH_SIZE = '0';
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const env = getEnv();
+
+    expect(env.CLASSIFY_CONFIDENCE_THRESHOLD).toBe(0);
+    expect(env.LLM_BATCH_SIZE).toBe(10);
+  });
+});
+
 describe('required credentials still fail loudly', () => {
   it('throws when DATABASE_URL is absent', () => {
     delete mutableEnv.DATABASE_URL;

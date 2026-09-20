@@ -284,6 +284,28 @@ function formatIssues(issues: EnvIssue[]): string {
 }
 
 /**
+ * Drop variables that are present but blank.
+ *
+ * A dashboard field left empty is not a value, but zod's `.default()` applies only
+ * to `undefined`: `z.string().default('x').parse('')` returns `''`, not `'x'`. So a
+ * blank `GROQ_MODEL_ACCURATE` produced an empty model name that Groq rejects, and
+ * blank numeric fields became `0` — out of range for anything measured in batches
+ * or days, and silently wrong for a budget reserve or a daily limit.
+ *
+ * Pruning blanks before parsing makes every `.default()` in the schema behave the
+ * way someone filling in a dashboard expects, and matches how `optionalString`
+ * already treats an empty value.
+ */
+function withoutBlankValues(source: NodeJS.ProcessEnv): Record<string, unknown> {
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(source)) {
+    if (typeof value === 'string' && value.trim() === '') continue;
+    cleaned[key] = value;
+  }
+  return cleaned;
+}
+
+/**
  * Re-parse with the offending keys removed.
  *
  * Stripping only the bad keys — rather than discarding the whole environment —
@@ -291,7 +313,7 @@ function formatIssues(issues: EnvIssue[]): string {
  * default, which would be a far more confusing failure than the one it replaced.
  */
 function parseIgnoring(issues: EnvIssue[]): Env {
-  const stripped = { ...process.env } as Record<string, unknown>;
+  const stripped = withoutBlankValues(process.env);
   for (const issue of issues) delete stripped[issue.variable];
 
   const retry = envSchema.safeParse(stripped);
@@ -319,7 +341,7 @@ function parseIgnoring(issues: EnvIssue[]): Env {
 export function getEnv(): Env {
   if (cached) return cached;
 
-  const parsed = envSchema.safeParse(process.env);
+  const parsed = envSchema.safeParse(withoutBlankValues(process.env));
   if (parsed.success) {
     cachedIssues = [];
     cached = parsed.data;

@@ -463,7 +463,7 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 │   ├── suppliers.csv               # 120+ suppliers incl. parents & subsidiaries
 │   ├── transactions.csv            # transaction-level shape (amounts aggregated)
 │   └── unspsc-v26-en.csv.gz        # 149,849 UNSPSC v26 codes (3.8 MB gz)
-├── tests/                          # 268 Vitest tests
+├── tests/                          # 272 Vitest tests
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
 ├── Dockerfile.worker
@@ -1033,6 +1033,13 @@ Two guards now stop that:
 * `lib/vercel-origin.mjs` repairs or drops a malformed `VERCEL_PROJECT_PRODUCTION_URL`,
   `VERCEL_URL` or `VERCEL_BRANCH_URL` before Next.js reads them (`next.config.mjs` runs it).
 
+A **blank** variable counts as unset, not as an empty value. This matters more than it sounds:
+zod's `.default()` applies only to `undefined`, so before this was handled a variable that existed
+but had been left empty produced `''` rather than its default. A blank `GROQ_MODEL_ACCURATE` became
+an empty model name (which Groq rejects, breaking all classification), and blank numeric fields
+became `0` — silently disabling the daily budget reserve and the enrichment credit limit. Blank
+fields are now pruned before parsing, so every default applies as expected.
+
 **So: read the `[env]` line, or `GET /api/health`, and delete that variable.** Only `DATABASE_URL` is
 required:
 
@@ -1097,6 +1104,8 @@ environment variable degrades there too rather than stopping the scheduler.
 | `DATABASE_URL is not configured` | Missing env var | Add it to `.env.local` (dev) or the Vercel/Render dashboard. |
 | `/api/health` shows `database: ok: false` | Wrong connection string, or Neon suspended | Use the **pooled** string with `?sslmode=require`; open the Neon console to wake the project. |
 | Classification returns "GROQ_API_KEY is not set" | Key missing in that environment | Set it in Vercel **and** Render — the worker classifies independently of the UI. |
+| `/api/health` shows `groq: configured ( / )` with blank model names, or `reserve: 0` | `GROQ_MODEL_ACCURATE` / `GROQ_MODEL_BULK` / `LLM_DAILY_BUDGET_RESERVE` exist but are blank. zod's `.default()` covers only `undefined`, so a blank field became `''` or `0` instead of its default — an empty model name is rejected by Groq, so classification silently fails | Fixed: blank values are treated as unset. Nothing to do beyond redeploying — or delete the variables and let the defaults apply |
+| Uploaded suppliers never appear, `database: ok` reports `0 suppliers` | The taxonomy was seeded but no supplier data was uploaded to *that* database | Upload `samples/suppliers.csv` at `/upload`, or run `npm run db:seed:sample` against the same database |
 | Everything is `unclassified` | `npm run db:seed` never ran | Run it; candidate injection and code validation both need the taxonomy. |
 | Codes look generic (`43210000`) or confidence is capped at 0.40 | The model returned a code that is not in the seeded taxonomy | Re-run `npm run db:seed`; verify with `select count(*) from unspsc_codes`. |
 | Groq 429 / "rate limit hit" | Free-tier quota | The worker pauses automatically; check `/settings` or `/api/health`, and prefer the 8B model for bulk work. |
