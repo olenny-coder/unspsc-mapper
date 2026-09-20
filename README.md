@@ -1084,10 +1084,31 @@ Diagnose from outside with the health endpoint, which names the offending variab
 curl -s https://your-app.vercel.app/api/health | jq '.checks[] | select(.name=="configuration")'
 ```
 
-The nine values that caused this are `ENRICH_CONCURRENCY`, `SYNC_STALE_DAYS`, `SYNC_BATCH_SIZE`,
-`SYNC_MAX_BATCHES_PER_RUN`, `LLM_BATCH_SIZE`, `LLM_MAX_REQUESTS_PER_MINUTE`,
-`LLM_MAX_REQUESTS_PER_DAY_70B`, `LLM_MAX_REQUESTS_PER_DAY_8B` and `PORT`. All require a value of at
-least `1`, so a `0` means "unset" and is replaced by the default. Delete them to silence the warning.
+The nine values that caused this are every numeric setting whose minimum is `1`. Deleting them is
+always the right move — each has a working default:
+
+| Variable | If present, must be | Delete to get |
+|---|---|---|
+| `ENRICH_CONCURRENCY` | 1–20 | 3 |
+| `SYNC_STALE_DAYS` | 1–3650 | 30 |
+| `SYNC_BATCH_SIZE` | 1–500 | 25 |
+| `SYNC_MAX_BATCHES_PER_RUN` | 1–1000 | 12 |
+| `LLM_BATCH_SIZE` | 1–10 | 10 |
+| `LLM_MAX_REQUESTS_PER_MINUTE` | 1–1000 | 25 |
+| `LLM_MAX_REQUESTS_PER_DAY_70B` | 1–100000 | 1000 |
+| `LLM_MAX_REQUESTS_PER_DAY_8B` | 1–1000000 | 14400 |
+| `PORT` | 1–65535 | 10000 |
+
+`PORT` matters only to the Render worker's HTTP server, which is why `render.yaml` sets it to
+`10000`. On Vercel nothing reads it, so delete it there. These are also the settings that arrived as
+`0` when a dashboard was filled in from a defaults list — hence the note above about blank values.
+
+List them again at any time without signing in, since `/api/health` is a public path:
+
+```bash
+curl -s https://your-app.vercel.app/api/health \
+  | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).checks.find(c=>c.name==='configuration').detail))"
+```
 
 The same policy protects the Render worker, which reads the same module — so a `0` in a Render
 environment variable degrades there too rather than stopping the scheduler.
