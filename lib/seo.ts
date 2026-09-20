@@ -82,11 +82,29 @@ export function canonicalUrl(path = '/'): string {
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+/**
+ * Social/Google preview card.
+ *
+ * PNG rather than SVG: most social scrapers will not render an SVG `og:image`
+ * (they fetch it and fall back to a blank card). Generated reproducibly by
+ * `node scripts/generate-icons.mjs`.
+ */
 export const OG_IMAGE = {
-  path: '/opengraph-image.svg',
+  path: '/opengraph-image.png',
   width: 1200,
   height: 630,
-  alt: 'UNSPSC Spend Categorizer — classify procurement spend into UNSPSC codes',
+  alt: 'UNSPSC Spend Categorizer — classify procurement spend into UNSPSC codes and roll it up by parent company',
+  type: 'image/png',
+} as const;
+
+/** Brand icons. All produced by `node scripts/generate-icons.mjs`. */
+export const BRAND_ICONS = {
+  /** Vector master, referenced by the header mark and the PWA manifest. */
+  svg: '/icon.svg',
+  favicon: '/favicon.ico',
+  png192: '/icon-192.png',
+  png512: '/icon-512.png',
+  appleTouch: '/apple-touch-icon.png',
 } as const;
 
 /**
@@ -149,6 +167,7 @@ export function rootMetadata(): Metadata {
           width: OG_IMAGE.width,
           height: OG_IMAGE.height,
           alt: OG_IMAGE.alt,
+          type: OG_IMAGE.type,
         },
       ],
     },
@@ -161,11 +180,21 @@ export function rootMetadata(): Metadata {
       images: [OG_IMAGE.path],
     },
     icons: {
-      // Only files that actually exist in `public/`. Referencing a missing
-      // `favicon.ico` makes every page request 404 on it.
-      icon: [{ url: '/icon.svg', type: 'image/svg+xml' }],
-      shortcut: [{ url: '/icon.svg', type: 'image/svg+xml' }],
-      apple: [{ url: '/icon.svg', type: 'image/svg+xml' }],
+      /*
+       * A complete icon set, declared explicitly rather than relying on Next's
+       * file conventions, so every platform gets the right asset:
+       *   - `shortcut`/`icon`  browser tabs (ICO for legacy, PNG for modern,
+       *                        SVG for anything that supports it)
+       *   - `apple`            iOS home screen, opaque and inset
+       */
+      icon: [
+        { url: BRAND_ICONS.favicon, sizes: '16x16 32x32 48x48', type: 'image/x-icon' },
+        { url: BRAND_ICONS.png192, sizes: '192x192', type: 'image/png' },
+        { url: BRAND_ICONS.png512, sizes: '512x512', type: 'image/png' },
+        { url: BRAND_ICONS.svg, type: 'image/svg+xml' },
+      ],
+      shortcut: [{ url: BRAND_ICONS.favicon, type: 'image/x-icon' }],
+      apple: [{ url: BRAND_ICONS.appleTouch, sizes: '180x180', type: 'image/png' }],
     },
     manifest: '/manifest.webmanifest',
     other: {

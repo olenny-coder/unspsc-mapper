@@ -64,6 +64,7 @@ Drizzle ORM · Neon Postgres · CSV / PDF reporting.
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Design decisions and trade-offs](#design-decisions-and-trade-offs)
+- [Branding](#branding)
 - [Licence](#licence)
 - [SEO and metadata](#seo-and-metadata)
 
@@ -178,6 +179,8 @@ echo 'ENRICH_PROVIDER="none"' >> .env.local
 npm run db:migrate
 npm run db:seed            # loads 149,849 UNSPSC v26 codes
 npm run db:seed:sample     # loads samples/suppliers.csv and runs the pipeline
+npm run db:seed:demo       # optional: illustrative classifications, so the dashboard
+                           # chart and review queue are populated without a Groq key
 
 # 4. Run
 npm run dev                # http://localhost:3000
@@ -199,6 +202,8 @@ dashboard.
 | `npm run db:migrate` | Apply `db/migrations/*.sql` to `DATABASE_URL` |
 | `npm run db:seed` | Seed the UNSPSC taxonomy (`-- --limit=5000` for a quick run) |
 | `npm run db:seed:sample` | Seed `samples/suppliers.csv` and run enrich → link → classify → report |
+| `npm run db:seed:demo` | Write illustrative classifications offline (no Groq key needed) so every screen has data; `-- --clean` removes them |
+| `npm run assets:generate` | Regenerate the favicon, PWA icons and social card from the brand geometry |
 | `npm run db:studio` | Drizzle Studio |
 | `npm run worker:dev` | Run the worker locally with watch |
 | `npm run worker:start` | Run the worker as Render does (`node --import tsx worker/index.ts`) |
@@ -956,6 +961,41 @@ through `tsx`, so there is no second build output that can drift.
 **Audit everything, including failures.** `enrich_failed`, `stale_marked` and sync summaries are
 rows in `audit_log`. Free-tier operations fail regularly (quota, cold starts, provider 404s), and
 a run that silently did nothing is worse than one that reports why.
+
+---
+
+## Branding
+
+The mark is a rounded container holding **three ascending rounded bars** — spend rolled up and
+classified. The geometry exists once, in `public/icon.svg` (a 64×64 coordinate space), and
+everything else derives from it.
+
+| Asset | Purpose |
+|---|---|
+| `public/icon.svg` | Vector master; `components/logo-mark.tsx` inlines the same paths so the header mark inherits the theme with no network request |
+| `public/favicon.ico` | 16/32/48 multi-size ICO for browser tabs and legacy clients |
+| `public/icon-192.png`, `public/icon-512.png` | PWA / Android home screen |
+| `public/apple-touch-icon.png` | 180×180, **opaque** and inset into the safe zone — iOS composites transparency on white, and masks the icon to a squircle |
+| `public/icon-maskable.svg` | Maskable variant with the mark inside the 80% safe zone |
+| `public/opengraph-image.png` | 1200×630 social card (**PNG**, not SVG — most scrapers will not render an SVG `og:image` and fall back to a blank card) |
+| `public/opengraph-image.svg` | Editable source for the same card |
+
+Rasters are not hand-drawn. `scripts/generate-icons.mjs` rasterises the geometry with 4×
+supersampling and encodes PNG (with `zlib`) and the ICO container **without any image dependency**,
+so the assets are reproducible and reviewable rather than binary blobs of unknown origin:
+
+```bash
+npm run assets:generate
+```
+
+**Chart bars are fully rounded.** Recharts emits a `path` with arc commands for a `radius`, so the
+dashboard bars use `radius={[6,6,6,6]}` — clamped to half the bar thickness, giving stadium-shaped
+bars. `scripts/probe-chart.mjs` asserts this in the real DOM (`bar <path>` count and arc commands
+per bar), because a `radius` prop that is silently ignored looks identical in the source.
+
+**PDF reports carry the mark too** — drawn with SVG path commands (`drawSvgPath`), since PDF has no
+erase operation and pdf-lib has no rounded-rectangle primitive, so the geometry has to be correct
+rather than patched up with corner overlays.
 
 ---
 

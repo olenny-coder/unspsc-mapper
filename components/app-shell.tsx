@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, Menu, X } from 'lucide-react';
 import { NavLinks } from '@/components/nav-links';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { LogoMark } from '@/components/logo-mark';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -59,10 +60,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="mx-auto flex w-full max-w-[1600px] items-center gap-3 px-4 py-3 sm:px-6">
-          <Link href="/" className="flex min-w-0 items-center gap-2">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
-              UN
-            </span>
+          <Link href="/" className="flex min-w-0 items-center gap-2.5" aria-label="UNSPSC Spend Categorizer — dashboard">
+            <LogoMark className="h-8 w-8 shrink-0 rounded-lg shadow-sm" />
             <span className="min-w-0 text-sm font-semibold leading-tight">
               <span className="block truncate">UNSPSC Spend Categorizer</span>
               <span className="hidden text-xs font-normal text-muted-foreground sm:block">

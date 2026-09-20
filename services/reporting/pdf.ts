@@ -347,6 +347,80 @@ class PdfLayout {
     this.y -= height + 12;
   }
 
+  /**
+   * Draw the brand mark: a rounded container with three ascending rounded bars.
+   *
+   * Built from SVG paths rather than rectangles. pdf-lib has no
+   * rounded-rectangle primitive and PDF has no erase operation, so overlaying
+   * "corner" squares cannot round anything — the geometry has to be correct from
+   * the start. Geometry mirrors `public/icon.svg`.
+   */
+  brandMark(size = 46): void {
+    const x0 = MARGIN;
+    const yTop = this.y;
+
+    // pdf-lib maps SVG path coordinates with the origin at (x, y) and y growing
+    // downward, so each path is expressed once in the 0..64 source space and
+    // scaled. The arc (`A`) command lets the corners be true quarter circles.
+    const s = size / 64;
+
+    const containerPath = [
+      'M 15 0',
+      'H 49',
+      'A 15 15 0 0 1 64 15',
+      'V 49',
+      'A 15 15 0 0 1 49 64',
+      'H 15',
+      'A 15 15 0 0 1 0 49',
+      'V 15',
+      'A 15 15 0 0 1 15 0',
+      'Z',
+    ].join(' ');
+
+    this.page.drawSvgPath(containerPath, {
+      x: x0,
+      y: yTop,
+      scale: s,
+      color: PDF_COLORS.accent,
+      borderWidth: 0,
+    });
+
+    // Three ascending bars, each a stadium (fully rounded ends).
+    const barPath = (bx: number, by: number, bw: number, bh: number): string => {
+      const r = Math.min(bw, bh) / 2;
+      return [
+        `M ${bx + r} ${by}`,
+        `H ${bx + bw - r}`,
+        `A ${r} ${r} 0 0 1 ${bx + bw} ${by + r}`,
+        `V ${by + bh - r}`,
+        `A ${r} ${r} 0 0 1 ${bx + bw - r} ${by + bh}`,
+        `H ${bx + r}`,
+        `A ${r} ${r} 0 0 1 ${bx} ${by + bh - r}`,
+        `V ${by + r}`,
+        `A ${r} ${r} 0 0 1 ${bx + r} ${by}`,
+        'Z',
+      ].join(' ');
+    };
+
+    const bars: Array<{ x: number; y: number; w: number; h: number; color: ReturnType<typeof rgb> }> = [
+      { x: 14, y: 34, w: 9, h: 17, color: rgb(1, 1, 1) },
+      { x: 27.5, y: 26, w: 9, h: 25, color: rgb(1, 1, 1) },
+      { x: 41, y: 16, w: 9, h: 35, color: rgb(0.749, 0.859, 0.996) },
+    ];
+
+    for (const bar of bars) {
+      this.page.drawSvgPath(barPath(bar.x, bar.y, bar.w, bar.h), {
+        x: x0,
+        y: yTop,
+        scale: s,
+        color: bar.color,
+        borderWidth: 0,
+      });
+    }
+
+    this.y = yTop - size - 10;
+  }
+
   finish(): void {
     this.drawFooter();
   }
@@ -413,7 +487,11 @@ export async function renderSupplierPdf(
   const layout = await PdfLayout.create(`${dataset.meta.name} | UNSPSC spend report`);
 
   // ---- title page ---------------------------------------------------------
-  layout.gap(120);
+  layout.gap(96);
+  // Brand mark, drawn from primitives so reports carry the same identity as the
+  // app without embedding an image. Geometry mirrors public/icon.svg.
+  layout.brandMark();
+  layout.gap(18);
   layout.text('UNSPSC SPEND REPORT', { size: 11, bold: true, color: PDF_COLORS.accent });
   layout.gap(4);
   layout.text(dataset.meta.name, { size: 26, bold: true, lineHeight: 32 });

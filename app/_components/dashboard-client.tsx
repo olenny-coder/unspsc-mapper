@@ -387,7 +387,13 @@ export default function DashboardPage() {
                       color: 'hsl(var(--popover-foreground))',
                     }}
                   />
-                  <Bar dataKey="spend" radius={[0, 4, 4, 0]}>
+                  {/*
+                    Fully rounded bar caps. Recharts clamps each corner radius to
+                    half the bar thickness, so a radius of 6 produces a stadium
+                    (pill) shape on the ~14px bars while also rounding the baseline
+                    end — matching the rounded language of the rest of the UI.
+                  */}
+                  <Bar dataKey="spend" radius={[6, 6, 6, 6]}>
                     {chartData.map((entry, index) => (
                       <Cell
                         key={entry.name}

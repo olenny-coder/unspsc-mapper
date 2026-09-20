@@ -44,10 +44,12 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx scripts/seed-unspsc.ts",
     "db:seed:sample": "tsx scripts/seed-sample-suppliers.ts",
+    "db:seed:demo": "tsx scripts/seed-demo-classifications.ts",
     "worker:dev": "tsx watch worker/index.ts",
     "worker:start": "node --import tsx worker/index.ts",
     "worker:once": "tsx worker/index.ts --once=full",
     "worker:ping": "node scripts/ping-worker.mjs",
+    "assets:generate": "node scripts/generate-icons.mjs",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
     "check:all": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
