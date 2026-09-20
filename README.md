@@ -845,16 +845,81 @@ CRON_SECRET=... curl -s -X POST "https://<worker>.onrender.com/run?job=sync" | j
 
 ### Step 7 — Keep-alive + cron
 
-1. Create a free account at <https://cron-job.org>.
-2. New cronjob → URL `https://<worker>.onrender.com/health`, every **5 minutes**.
-3. (Optional) A second daily job that POSTs `/run?job=sync` with
-   `Authorization: Bearer <CRON_SECRET>` as a belt-and-braces trigger.
+Render's free tier spins a service down after 15 minutes without traffic, and a sleeping worker
+cannot fire its own schedule — so this step is what makes the daily sync actually run.
 
-   Or run the bundled script from any machine:
+**The required job: keep the worker awake.**
+
+1. Create a free account at <https://cron-job.org> and confirm your email address (they verify
+   before jobs will run).
+2. **Create cronjob**, then:
+
+   | Field | Value |
+   |---|---|
+   | Title | `unspsc-worker keep-alive` |
+   | URL | `https://<worker>.onrender.com/health` |
+   | Schedule | Every **5 minutes** (`*/5 * * * *`) |
+   | Request method | `GET` (the default) |
+   | Enable job | **on** |
+
+3. Leave authentication empty. `/health` is deliberately public and does no database work, so the
+   ping is fast and never holds a Neon connection open.
+4. Enable **failure notifications** so a dead worker reaches you by email.
+
+Two quirks of the service are worth knowing before you read its history:
+
+* **The timeout is a fixed 30 seconds and cannot be changed.** A cold start can take 30–60 s, so the
+  very first ping after a long idle period may be recorded as a timeout. That is harmless — the
+  request still woke the service, and the next ping five minutes later succeeds in milliseconds.
+  This is why the interval matters more than the timeout: 5 minutes is well inside Render's 15-minute
+  spin-down window, so after the first ping the service stays warm.
+* **A job is disabled automatically after 25 consecutive failures.** With a 5-minute interval that is
+  over two hours of continuous failure, so it indicates a genuinely broken URL rather than a cold
+  start. If the job ever goes quiet, check that it has not been disabled.
+
+**Verify it — don't trust the dashboard's green tick alone.** cron-job.org keeps the last 50
+executions with response headers and bodies for 2 days, so you can read the actual JSON it received.
+Better still, the service reports its own uptime, which proves it never slept:
+
+```bash
+curl -s https://<worker>.onrender.com/health | grep uptimeSeconds
+```
+
+`uptimeSeconds` should climb past 3600 and keep growing. If it keeps resetting to a small number,
+the pings are not reaching the service.
+
+**The optional second job: an explicit sync trigger.**
+
+The worker runs its own scheduler (`CRON_SYNC`, default `0 3 * * *`) and re-runs a window it slept
+through on boot. This job is only insurance against the worker being down at 03:00 for longer than
+the catch-up covers.
+
+| Field | Value |
+|---|---|
+| URL | `https://<worker>.onrender.com/run?job=sync` |
+| Schedule | Daily at 03:15 UTC (`15 3 * * *`), after the built-in 03:00 run |
+| Request method | **POST** — a GET returns 404 by design |
+| Header | `Authorization: Bearer <CRON_SECRET>` |
+
+Credentials are read from `Authorization: Bearer <CRON_SECRET>`, an `x-cron-secret` header, or
+`?secret=`. Prefer the header: a query string ends up in logs and request history. The secret is
+`CRON_SECRET` when set, otherwise `WORKER_SECRET`. If you would rather not store a secret in a
+third-party dashboard, skip this job — the keep-alive above is the part that matters, and the
+built-in scheduler plus catch-up already covers the daily run.
+
+Or trigger it yourself from any machine, which is also what CI uses:
 
 ```bash
 WORKER_URL=https://<worker>.onrender.com CRON_SECRET=... node scripts/ping-worker.mjs $WORKER_URL --sync --strict
 ```
+
+**Free alternatives**, if you would rather not use cron-job.org: anything that can hit a URL on a
+schedule works — UptimeRobot's free plan (5-minute checks) or Better Stack. A GitHub Actions
+`scheduled` workflow is a poor fit here: the minimum interval is 5 minutes and GitHub disables
+schedules on repositories with no recent activity, which describes a deployment repo exactly.
+
+On a paid Render plan, drop the ping entirely and uncomment the native `worker` service at the
+bottom of `render.yaml`, which gives a real cron schedule.
 
 ### Step 8 — Smoke test the whole system
 
