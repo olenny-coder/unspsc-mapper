@@ -29,11 +29,13 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useDemoMode } from '@/components/demo-mode';
 import { ExportDialog } from '@/components/export-dialog';
 import { api, type HierarchyClusterDto, type SupplierRowDto } from '@/lib/client';
 import { formatCurrency, formatNumber } from '@/lib/format';
 
 export default function HierarchyPage() {
+  const { demo } = useDemoMode();
   const [clusters, setClusters] = React.useState<HierarchyClusterDto[]>([]);
   const [totals, setTotals] = React.useState({ clusters: 0, parents: 0, suppliers: 0, orphans: 0 });
   const [orphans, setOrphans] = React.useState<Array<{ id: number; name: string; parentName: string | null }>>([]);
@@ -224,9 +226,13 @@ export default function HierarchyPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={busy}
+                      disabled={busy || demo}
                       onClick={() => void reclassifyFamily(cluster)}
-                      title="Re-run classification for the parent and all of its subsidiaries"
+                      title={
+                        demo
+                          ? 'Unavailable in the read-only demo — sign in to make changes'
+                          : 'Re-run classification for the parent and all of its subsidiaries'
+                      }
                     >
                       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                       Reclassify family
@@ -258,7 +264,9 @@ export default function HierarchyPage() {
                             <Button
                               variant="outline"
                               size="sm"
+                              disabled={demo}
                               onClick={() => setLinkTarget({ id: member.id, name: member.name })}
+                              title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
                             >
                               <Link2 className="h-3.5 w-3.5" />
                               Add subsidiary
@@ -267,8 +275,9 @@ export default function HierarchyPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={busy}
+                              disabled={busy || demo}
                               onClick={() => void unlink(member.id, member.name)}
+                              title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
                             >
                               <Link2Off className="h-3.5 w-3.5" />
                               Unlink
@@ -405,7 +414,8 @@ export default function HierarchyPage() {
             </Button>
             <Button
               onClick={() => void submitLink()}
-              disabled={busy || (parentMode === 'existing' ? !parentId : parentName.trim().length < 2)}
+              disabled={busy || demo || (parentMode === 'existing' ? !parentId : parentName.trim().length < 2)}
+              title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
               Link parent

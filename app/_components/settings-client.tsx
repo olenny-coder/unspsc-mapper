@@ -13,6 +13,7 @@ import {
   Server,
   Sliders,
 } from 'lucide-react';
+import { useDemoMode } from '@/components/demo-mode';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -45,6 +46,7 @@ type Draft = {
 };
 
 export default function SettingsPage() {
+  const { demo } = useDemoMode();
   const [data, setData] = React.useState<SettingsDto | null>(null);
   const [health, setHealth] = React.useState<HealthDto | null>(null);
   const [draft, setDraft] = React.useState<Draft | null>(null);
@@ -169,7 +171,12 @@ export default function SettingsPage() {
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Reload
           </Button>
-          <Button size="sm" onClick={() => void save()} disabled={busy || !draft}>
+          <Button
+            size="sm"
+            onClick={() => void save()}
+            disabled={busy || !draft || demo}
+            title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+          >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save settings
           </Button>
@@ -464,11 +471,23 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => void runSync('full')} disabled={syncBusy !== null}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void runSync('full')}
+                    disabled={syncBusy !== null || demo}
+                    title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+                  >
                     {syncBusy === 'full' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                     Run sync now
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => void runSync('report')} disabled={syncBusy !== null}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void runSync('report')}
+                    disabled={syncBusy !== null || demo}
+                    title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+                  >
                     {syncBusy === 'report' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     Generate weekly report now
                   </Button>

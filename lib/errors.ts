@@ -86,6 +86,19 @@ export class ConfigError extends AppError {
   }
 }
 
+/**
+ * 403 — a demo visitor tried to do something that changes state.
+ *
+ * A distinct code rather than a plain `unauthorized`, because the UI needs to tell
+ * the user "this is a read-only demo, sign in to make changes" rather than the
+ * "your session expired, sign in again" treatment a 401 triggers.
+ */
+export class DemoReadOnlyError extends AppError {
+  constructor(message: string, details?: Record<string, unknown>) {
+    super(message, { code: 'demo_read_only', status: 403, details });
+  }
+}
+
 export class DatabaseError extends AppError {
   constructor(message: string, cause?: unknown, details?: Record<string, unknown>) {
     super(message, { code: 'database_error', status: 500, details, cause });

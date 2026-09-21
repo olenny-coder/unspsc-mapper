@@ -13,6 +13,7 @@
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { authErrorResponse, authorizeRequest, isPublicPath, type AuthOutcome } from '@/lib/auth';
+import { isDemoMode } from '@/lib/env';
 
 export const config = {
   // Skip static assets and the favicon; everything else is checked.
@@ -66,6 +67,17 @@ export async function middleware(request: NextRequest) {
   }
 
   if (outcome.authorized) return NextResponse.next();
+
+  /*
+   * Anonymous visitor on a demo deployment: let the request through instead of
+   * redirecting to the login form.
+   *
+   * Nothing is exposed by doing so. The API layer answers this caller's read
+   * requests from the bundled fixture in `lib/demo/` and refuses every mutation, so
+   * no route handler and no query runs on their behalf. Pages are thin wrappers
+   * around client components and carry no data of their own.
+   */
+  if (isDemoMode()) return NextResponse.next();
 
   // API routes answer with JSON so scripts and the UI client surface the reason.
   if (pathname.startsWith('/api/')) {

@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Download, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useDemoMode } from '@/components/demo-mode';
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,7 @@ export function ExportDialog({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [name, setName] = React.useState(suggestedName ?? '');
+  const { demo } = useDemoMode();
   // Stabilise the effect dependency: callers often pass an inline object.
   const filtersKey = JSON.stringify(filters);
 
@@ -85,7 +87,17 @@ export function ExportDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant={variant} size="sm">
+        {/*
+          Disabled in the demo rather than opening a dialog whose preview and
+          download both answer 403. Exports are the one read the demo refuses,
+          because they would hand out a file built from the sample set.
+        */}
+        <Button
+          variant={variant}
+          size="sm"
+          disabled={demo}
+          title={demo ? 'Downloads are disabled in the read-only demo' : undefined}
+        >
           <Download className="h-4 w-4" />
           {label}
         </Button>

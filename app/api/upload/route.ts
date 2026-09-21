@@ -16,6 +16,7 @@ import { requireAuth } from '@/lib/auth';
 import { getEnv } from '@/lib/env';
 import { ValidationError } from '@/lib/errors';
 import { parseSupplierCsv } from '@/lib/csv';
+import { UPLOAD_ACCEPTED_COLUMNS, UPLOAD_TEMPLATE } from '@/lib/upload-template';
 import { uploadOptionsSchema } from '@/lib/validation';
 import {
   bulkUpsertSuppliers,
@@ -257,27 +258,11 @@ export const POST = jsonHandler(async (request: NextRequest) => {
 
 /** GET /api/upload returns the accepted template so the UI can offer a download. */
 export const GET = jsonHandler(async () => {
-
-  const template = [
-    'name,amount,date,domain,industry,naics,parent',
-    'Dell Technologies,125000.00,2024-03-01,dell.com,Computer manufacturing,334111,',
-    'EMC Corporation,84000.50,2024-03-04,emc.com,Computer storage,334112,Dell Technologies',
-    'Grainger,52300.00,2024-03-05,grainger.com,Industrial supplies,423840,',
-  ].join('\n');
-
   return NextResponse.json({
     ok: true,
     data: {
-      template,
-      acceptedColumns: {
-        name: ['name', 'supplier', 'supplier_name', 'vendor', 'company'],
-        amount: ['amount', 'spend', 'total', 'value', 'invoice_amount'],
-        date: ['date', 'transaction_date', 'invoice_date', 'posted_date'],
-        domain: ['domain', 'website', 'url', 'supplier_domain'],
-        industry: ['industry', 'sector'],
-        naics: ['naics', 'naics_code'],
-        parent: ['parent', 'parent_name', 'parent_company', 'ultimate_parent'],
-      },
+      template: UPLOAD_TEMPLATE,
+      acceptedColumns: UPLOAD_ACCEPTED_COLUMNS,
     },
   });
 });

@@ -3,11 +3,12 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, Menu, X } from 'lucide-react';
+import { LogIn, LogOut, Menu, X } from 'lucide-react';
 import { NavLinks } from '@/components/nav-links';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { LogoMark } from '@/components/logo-mark';
 import { Button } from '@/components/ui/button';
+import { DemoBanner, DemoProvider, useDemoMode } from '@/components/demo-mode';
 import { cn } from '@/lib/utils';
 
 /**
@@ -24,9 +25,30 @@ import { cn } from '@/lib/utils';
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+
+  if (pathname === '/login') {
+    return <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6">{children}</main>;
+  }
+
+  return (
+    <DemoProvider>
+      <ShellChrome>{children}</ShellChrome>
+    </DemoProvider>
+  );
+}
+
+/**
+ * The header, navigation and footer.
+ *
+ * Split out of `AppShell` so it can read the demo state that `AppShell` provides. A
+ * demo visitor has no session to end, so the header offers them a way *in* instead
+ * of a sign-out control that could only mislead.
+ */
+function ShellChrome({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = React.useState(false);
-  const isLogin = pathname === '/login';
+  const { demo } = useDemoMode();
 
   // Close the mobile menu whenever the route changes.
   React.useEffect(() => {
@@ -52,10 +74,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (isLogin) {
-    return <main className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6">{children}</main>;
-  }
-
   return (
     <>
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -74,15 +92,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="ml-auto hidden items-center gap-1 lg:flex">
             <NavLinks />
             <ThemeToggle />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => void signOut()}
-              aria-label="Sign out"
-              title="Sign out"
-            >
-              <LogOut className="h-[1.15rem] w-[1.15rem]" />
-            </Button>
+            {demo ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/login">
+                  <LogIn className="h-4 w-4" />
+                  Sign in
+                </Link>
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => void signOut()}
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut className="h-[1.15rem] w-[1.15rem]" />
+              </Button>
+            )}
           </div>
 
           {/* Mobile: theme toggle stays reachable, navigation collapses. */}
@@ -110,17 +137,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <nav className="mx-auto w-full max-w-[1600px] px-2 py-2" aria-label="Main">
             <NavLinks orientation="vertical" onNavigate={() => setMenuOpen(false)} />
             <div className="mt-1 border-t pt-1">
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <LogOut className="h-4 w-4" />
-                Sign out
-              </button>
+              {demo ? (
+                <Link
+                  href="/login"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <LogIn className="h-4 w-4" />
+                  Sign in
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void signOut()}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign out
+                </button>
+              )}
             </div>
           </nav>
         </div>
+
+        <DemoBanner />
       </header>
 
       <main className="mx-auto w-full max-w-[1600px] px-4 py-4 sm:px-6 sm:py-6">{children}</main>

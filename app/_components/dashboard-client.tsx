@@ -30,6 +30,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConfidenceBadge, StaleBadge } from '@/components/confidence-badge';
+import { useDemoMode } from '@/components/demo-mode';
 import { ExportDialog } from '@/components/export-dialog';
 import {
   EMPTY_FILTERS,
@@ -90,6 +91,7 @@ function useIsNarrow(): boolean {
 }
 
 export default function DashboardPage() {
+  const { demo } = useDemoMode();
   const chartColors = useChartColors();
   const isNarrow = useIsNarrow();
   const [filters, setFilters] = React.useState<DashboardFilterState>(EMPTY_FILTERS);
@@ -231,8 +233,12 @@ export default function DashboardPage() {
             variant="outline"
             size="sm"
             onClick={() => void runSync()}
-            disabled={busy !== null}
-            title="Re-enrich suppliers that are stale or never enriched"
+            disabled={busy !== null || demo}
+            title={
+              demo
+                ? 'Unavailable in the read-only demo — sign in to make changes'
+                : 'Re-enrich suppliers that are stale or never enriched'
+            }
           >
             {busy === 'sync' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             Sync stale
@@ -241,14 +247,21 @@ export default function DashboardPage() {
             variant="outline"
             size="sm"
             onClick={() => void refreshSelected()}
-            disabled={!selected.length || busy !== null}
+            disabled={!selected.length || busy !== null || demo}
+            title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
           >
             {busy === 'enrich' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             <span className="hidden sm:inline">Refresh selected</span>
             <span className="sm:hidden">Refresh</span>
             {selected.length ? ` (${selected.length})` : ''}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void classifySelected()} disabled={busy !== null}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void classifySelected()}
+            disabled={busy !== null || demo}
+            title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+          >
             {busy === 'classify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
             {/* The long label would push the toolbar onto three rows on a phone. */}
             <span className="hidden sm:inline">

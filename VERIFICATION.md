@@ -9,7 +9,7 @@ seeded. Recorded here so a reviewer can reproduce each step.
 |---|---|
 | `npm run lint` (`next lint --max-warnings=0`) | ✔ No ESLint warnings or errors |
 | `npm run typecheck` (`tsc --noEmit`) | clean |
-| `npm test` (Vitest) | 14 files, **272 tests passed** |
+| `npm test` (Vitest) | 15 files, **307 tests passed** |
 | `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
 
@@ -75,6 +75,50 @@ database:
 `render.yaml` runs `npm ci --omit=dev`, so `tsx` (which executes the TypeScript worker directly) and
 `dotenv` must be **production** dependencies. Verified: `tsx@4.23.13` and `dotenv@16.6.1` both
 resolve under `npm ls --omit=dev`.
+
+## Demo mode isolation
+
+`DEMO_MODE=true` lets an anonymous visitor browse the whole application against a bundled sample
+dataset. The claim to verify is not "the demo looks right" but "a demo request cannot reach real
+data". Two independent checks were run.
+
+### 1. Unit level — the database is made to throw
+
+`tests/demo.test.ts` mocks `getDb()` to throw, then drives every demo read endpoint. Any demo path
+that reached a query would fail loudly instead of quietly returning a row. 35 tests pass, covering:
+
+| Assertion | Result |
+|---|---|
+| Every demo read (`metrics`, `suppliers`, `suppliers?meta`, `classifications` ×2, `hierarchy`, `audit` ×2, `reports` ×2, `settings`, `classify`, `upload`, `auth/session`) | 200, `ok: true`, with `getDb` throwing |
+| Every mutating verb (`POST`/`PUT`/`PATCH`/`DELETE`) | 403 `demo_read_only`, and the real handler is **never invoked** (spy) |
+| Identical request with a valid credential on the same deployment | the real handler **is** invoked, normally |
+| `DEMO_MODE=false` | no diversion at all; the route's own `requireAuth` is reached, as before |
+| An endpoint the demo does not list | 404, not inherited — so a newly added route is private by default |
+| `/api/export` (a read the demo deliberately refuses) | 403 |
+| A wrong bearer token or a tampered session cookie | `denied`, i.e. 401 and the sign-in flow — **not** demo data |
+
+That last row is the subtle one: only a request carrying *no* credential is a demo visitor. An
+expired session must not be answered from the sample set, because that would show fabricated
+suppliers and amounts to someone who believes they are looking at their real deployment.
+
+### 2. Transport level — with Postgres stopped entirely
+
+A production server (`next start`) was run with `DEMO_MODE=true`, and the local Postgres container
+was stopped mid-verification. That turned out to be the strongest available test:
+
+| Request | Result |
+|---|---|
+| Anonymous `GET /api/metrics` | **200** — 50 suppliers, 43 classified / 7 unclassified, spend 115,155,000, 15 segments, 31 rollup clusters, 14 review rows, 6 inherited, 4 stale |
+| Authenticated `GET /api/metrics` | **500** — a real database error, proving the owner's path is routed to the database and not to the fixture |
+| All seven pages (`/`, `/upload`, `/settings`, `/hierarchy`, `/audit`, `/reports`, `/review`) anonymously | 200 |
+| `/api/hierarchy`, `/api/classifications?view=queue`, `/api/audit`, `/api/reports` anonymously | 200 — 31 clusters, 14 queue rows, 32 audit entries, 6 reports |
+| `POST /api/upload`, `PATCH /api/settings`, `DELETE /api/hierarchy` anonymously | 403 `demo_read_only` |
+| `GET /api/export?format=csv`, and an unlisted `/api/some-future-endpoint` | 403 and 404 |
+| `/api/health` anonymously | 200, database row counts reduced to `reachable` |
+| `/api/auth/session` anonymously | `demo: true`, so the UI shows the banner and a Sign in link |
+
+A complete dashboard was served **with no database reachable at all**, which is only possible because
+the demo path has no database dependency.
 
 ## SEO surfaces
 
@@ -323,6 +367,8 @@ Keep-alive script:
 | Any invalid environment value aborted a deployment | A typo in a dashboard field (`CLASSIFY_CONFIDENCE_THRESHOLD=70`, `SYNC_STALE_DAYS=30 days`) failed the build with an unreadable message | `getEnv()` substitutes the default for the offending variable, leaves the rest of the configuration intact, and names what it ignored in one compact log line; `app/not-found.tsx` added so the route has an explicit owner |
 | **`MIDDLEWARE_INVOCATION_FAILED` on every route of a live deployment** | Nine numeric variables left at `0` in the Vercel dashboard reached `getEnv()` through `lib/auth.ts` and killed the Edge middleware: `/`, `/upload`, `/audit`, `/reports` and every API route returned a bare 500, while `/login` and static assets kept working — so the app looked deployed but was entirely unusable. `GET /api/health` returned an empty 500, hiding the reason; only `/api/auth/session` leaked it | `getEnv()` no longer throws for tuning values, so the middleware has nothing to propagate. `middleware.ts` additionally catches anything unexpected and fails closed with a 503 stating the reason, instead of letting the platform return an opaque crash |
 | A misconfiguration that no longer throws became invisible | Degrading silently would trade a loud outage for a quiet wrong setting | `getEnvIssues()` records what was ignored and `GET /api/health` reports it as a `configuration` check naming every variable, so the problem is visible from outside the process |
+| **The demo would have asked an expired session to trust fabricated data** | The first implementation treated *any* unauthenticated request as a demo visitor, including one presenting an invalid or expired credential. A signed-in owner whose session lapsed would have been shown invented suppliers and amounts while believing they were looking at their real deployment — worse than an extra sign-in | `resolveRequestRole` returns `denied` for a presented-but-invalid credential and reserves `demo` for a request carrying no credential at all. Both cases are covered by tests |
+| Demo segment bars were grouped by the superseded code | `segmentsOf()` bucketed on `unspscCode` while production groups on `coalesce(correctedCode, unspscCode)`. A human-corrected row was therefore filed under its old segment, so a bar carried the wrong segment's name and the demo reported 14 segments where the data has 15 | Switched to `effectiveCode.slice(0, 2)`, with a test asserting the reported segment codes equal the set derived from `effectiveCode` |
 | **A blank environment variable defeated every schema default** | Found on the live deployment's `/api/health`: `groq: "configured ( / )"`. zod's `.default()` applies only to `undefined`, so `z.string().default('llama-3.3-70b-versatile').parse('')` returns `''`. A `GROQ_MODEL_ACCURATE` created but left empty therefore became an empty model name, which Groq rejects — **all classification would have failed** — while blank numeric fields silently became `0`, disabling the daily budget reserve and the enrichment credit limit | Blank and whitespace-only values are pruned before parsing (`withoutBlankValues`), so an empty dashboard field means "unset" and every `.default()` applies. Verified against a production server using the live deployment's exact environment: model names, `reserve: 50` and the 14,400/day 8B limit all restore |
 | **~36 × `TypeError: Invalid URL` during the Vercel build, exit 1** | Unfixable from app code as previously documented: Next.js itself runs `new URL(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`)` unguarded in `lib/metadata/resolvers/resolve-url.js`, and does so even when the app supplies its own `metadataBase` | `lib/vercel-origin.mjs` repairs a full URL to its host and drops an unusable value; `next.config.mjs` runs it before prerender workers are forked, so the correction is inherited. Verified: the same input that produced exit 1 and 36 errors now builds clean |
 | Environment warning repeated once per prerender worker | Sixteen multi-line blocks buried the variable names they existed to surface | The build path emits a single compact line per process; memoisation keeps it to one call per process. Locked in by a test asserting no newline and exactly one call |

@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { AlertTriangle, KeyRound, Loader2, Lock, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Eye, KeyRound, Loader2, Lock, ShieldCheck } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,6 +16,8 @@ type SessionState = {
   authConfigured: boolean;
   authDisabled: boolean;
   hint: string | null;
+  /** Set only when this deployment runs with DEMO_MODE and nobody is signed in. */
+  demo?: boolean;
 };
 
 export default function LoginPage() {
@@ -112,6 +114,29 @@ function LoginForm() {
                 Session granted via {state.via}. <a className="underline" href="/">Continue to the dashboard</a>.
               </AlertDescription>
             </Alert>
+          ) : null}
+
+          {/*
+            The demo entry point. Offered only when the deployment has opted in via
+            DEMO_MODE, so a normal installation never advertises a way in.
+          */}
+          {state?.demo ? (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+              <p className="flex items-center gap-2 text-sm font-medium text-amber-950 dark:text-amber-100">
+                <Eye className="h-4 w-4" aria-hidden />
+                Just looking around?
+              </p>
+              <p className="mt-1 text-xs text-amber-900/90 dark:text-amber-100/90">
+                This deployment has a read-only demo with illustrative sample data. Nothing you do there changes
+                anything, and no real spend data is shown.
+              </p>
+              <Button variant="outline" className="mt-2 w-full" asChild>
+                <a href="/">
+                  <Eye className="h-4 w-4" />
+                  Explore the demo
+                </a>
+              </Button>
+            </div>
           ) : null}
 
           <form onSubmit={submit} className="space-y-3">

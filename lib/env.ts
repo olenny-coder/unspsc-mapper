@@ -233,6 +233,21 @@ const envSchema = z.object({
    * Set to true only for a public demo deployment.
    */
   ALLOW_INDEXING: boolFromString(false),
+
+  /**
+   * Serve a read-only demo to anonymous visitors.
+   *
+   * Off by default, deliberately: this is the only setting that lets an
+   * unauthenticated request be answered at all. When it is on, anonymous requests
+   * are answered from a bundled illustrative dataset (`lib/demo/`) rather than the
+   * database, and every mutating endpoint refuses them.
+   *
+   * Because the demo path never reaches a route handler or a query, enabling this
+   * on a deployment that holds real data does not expose that data — it stops
+   * serving it to anyone who is not signed in.
+   */
+  DEMO_MODE: boolFromString(false),
+
   APP_ACTOR: z.string().default('dashboard'),
   ADMIN_EMAILS: optionalString,
 
@@ -443,6 +458,16 @@ export function isAuthDisabled(): boolean {
   if (env.NODE_ENV === 'production') return false;
   if (!env.ALLOW_UNAUTHENTICATED_DEV) return false;
   return dashboardSecret() === null;
+}
+
+/**
+ * Whether anonymous visitors are served the read-only demo.
+ *
+ * A signed-in caller always gets the real application; this only governs what
+ * happens when nobody is authenticated. See `lib/demo/` for what that means.
+ */
+export function isDemoMode(): boolean {
+  return getEnv().DEMO_MODE;
 }
 
 /** All secrets accepted by worker-only endpoints (rotation support). */

@@ -13,6 +13,7 @@
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { dynamic } from '@/lib/api';
+import { resolveRequestRole } from '@/lib/auth';
 import { getEnv, getEnvIssues, isEnrichmentConfigured, isGroqConfigured } from '@/lib/env';
 import { getDb } from '@/db/client';
 import { suppliers, unspscCodes } from '@/db/schema';
@@ -55,6 +56,15 @@ export async function GET(request: NextRequest) {
   // request, which keeps the app up but would otherwise hide the problem away in
   // a log. Reporting them here makes a misconfiguration visible from outside the
   // process — and `?strict=true` turns it into a 503 so a monitor notices.
+  /*
+   * Health is a public path, so an anonymous visitor on a demo deployment reaches
+   * this route directly — it is the one handler that does not pass through
+   * `jsonHandler`. Row counts are real data and are therefore reduced to plain
+   * reachability for anyone who is not signed in; the operational signal (up or
+   * down, plus latency) survives for uptime monitors.
+   */
+  const role = await resolveRequestRole(request);
+
   const envIssues = getEnvIssues();
   checks.push({
     name: 'configuration',
@@ -76,7 +86,16 @@ export async function GET(request: NextRequest) {
     const row = (result as unknown as Array<{ suppliers: number; codes: number }>)[0];
     return row ? `${row.suppliers} suppliers, ${row.codes} UNSPSC codes` : undefined;
   });
-  checks.push(database);
+  checks.push(
+    role === 'demo'
+      ? {
+          name: 'database',
+          ok: database.ok,
+          detail: database.ok ? 'reachable' : database.detail,
+          latencyMs: database.latencyMs,
+        }
+      : database,
+  );
 
   checks.push({
     name: 'groq',

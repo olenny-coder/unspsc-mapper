@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
+import { useDemoMode } from '@/components/demo-mode';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ import { api, exportUrl, type MetricsDto, type ReportListDto } from '@/lib/clien
 import { formatBytes, formatCurrency, formatDateTime, formatNumber, formatPercent } from '@/lib/format';
 
 export default function ReportsPage() {
+  const { demo } = useDemoMode();
   const [data, setData] = React.useState<ReportListDto | null>(null);
   const [metrics, setMetrics] = React.useState<MetricsDto | null>(null);
   const [budget, setBudget] = React.useState<Awaited<ReturnType<typeof api.reportBudget>> | null>(null);
@@ -126,18 +128,34 @@ export default function ReportsPage() {
             <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
             Reload
           </Button>
-          <Button variant="outline" size="sm" asChild>
-            <a href={exportUrl('csv', { rollup: 'parent' })} download>
+          {/* A disabled anchor is not a thing, so in the demo the same button
+              renders without its <a> child and carries the disabled attribute. */}
+          {demo ? (
+            <Button variant="outline" size="sm" disabled aria-disabled="true" title="Downloads are disabled in the demo">
               <FileSpreadsheet className="h-4 w-4" />
               Quick CSV
-            </a>
-          </Button>
-          <Button variant="outline" size="sm" asChild>
-            <a href={exportUrl('pdf', { rollup: 'parent' })} download>
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" asChild>
+              <a href={exportUrl('csv', { rollup: 'parent' })} download>
+                <FileSpreadsheet className="h-4 w-4" />
+                Quick CSV
+              </a>
+            </Button>
+          )}
+          {demo ? (
+            <Button variant="outline" size="sm" disabled aria-disabled="true" title="Downloads are disabled in the demo">
               <FileText className="h-4 w-4" />
               Quick PDF
-            </a>
-          </Button>
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" asChild>
+              <a href={exportUrl('pdf', { rollup: 'parent' })} download>
+                <FileText className="h-4 w-4" />
+                Quick PDF
+              </a>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -242,17 +260,34 @@ export default function ReportsPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button asChild>
-                <a href={exportUrl(format, { ...(rollup ? { rollup: 'parent' } : {}), ...(minConfidence ? { minConfidence: Number(minConfidence) } : {}) }, { name: reportName || undefined })} download>
+              {demo ? (
+                <Button disabled aria-disabled="true" title="Downloads are disabled in the demo">
                   <Download className="h-4 w-4" />
                   Download {format.toUpperCase()}
-                </a>
-              </Button>
-              <Button variant="outline" onClick={() => void generate(false)} disabled={busy !== null}>
+                </Button>
+              ) : (
+                <Button asChild>
+                  <a href={exportUrl(format, { ...(rollup ? { rollup: 'parent' } : {}), ...(minConfidence ? { minConfidence: Number(minConfidence) } : {}) }, { name: reportName || undefined })} download>
+                    <Download className="h-4 w-4" />
+                    Download {format.toUpperCase()}
+                  </a>
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => void generate(false)}
+                disabled={busy !== null || demo}
+                title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+              >
                 {busy === 'generate' ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDriveDownload className="h-4 w-4" />}
                 Generate and log (no store)
               </Button>
-              <Button variant="outline" onClick={() => void generate(true)} disabled={busy !== null || !workerSecret}>
+              <Button
+                variant="outline"
+                onClick={() => void generate(true)}
+                disabled={busy !== null || !workerSecret || demo}
+                title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+              >
                 {busy === 'store' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
                 Generate and store in Neon
               </Button>
@@ -346,18 +381,26 @@ export default function ReportsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="sm" asChild>
-                            <a href={`/api/reports/${report.id}/download`} download>
+                          {demo ? (
+                            <Button variant="outline" size="sm" disabled aria-disabled="true" title="Downloads are disabled in the demo">
                               <Download className="h-3.5 w-3.5" />
                               Download
-                            </a>
-                          </Button>
+                            </Button>
+                          ) : (
+                            <Button variant="outline" size="sm" asChild>
+                              <a href={`/api/reports/${report.id}/download`} download>
+                                <Download className="h-3.5 w-3.5" />
+                                Download
+                              </a>
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
                             onClick={() => void remove(report.id)}
-                            disabled={busy === `delete-${report.id}`}
+                            disabled={busy === `delete-${report.id}` || demo}
                             aria-label={`Delete report ${report.id}`}
+                            title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
                           >
                             {busy === `delete-${report.id}` ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />

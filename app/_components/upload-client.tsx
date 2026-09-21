@@ -3,6 +3,7 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Loader2, UploadCloud, X } from 'lucide-react';
+import { useDemoMode } from '@/components/demo-mode';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import { formatNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 export default function UploadPage() {
+  const { demo } = useDemoMode();
   const [dragging, setDragging] = React.useState(false);
   const [file, setFile] = React.useState<File | null>(null);
   const [enrich, setEnrich] = React.useState(true);
@@ -133,6 +135,7 @@ export default function UploadPage() {
                 type="file"
                 accept=".csv,text/csv"
                 className="hidden"
+                disabled={demo}
                 onChange={(event) => selectFile(event.target.files?.[0] ?? null)}
               />
             </div>
@@ -168,7 +171,11 @@ export default function UploadPage() {
             {uploading ? <Progress value={progress} /> : null}
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => void upload()} disabled={!file || uploading}>
+              <Button
+                onClick={() => void upload()}
+                disabled={!file || uploading || demo}
+                title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+              >
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                 Upload and process
               </Button>

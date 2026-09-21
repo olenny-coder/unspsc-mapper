@@ -30,6 +30,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ConfidenceBadge } from '@/components/confidence-badge';
+import { useDemoMode } from '@/components/demo-mode';
 import { ExportDialog } from '@/components/export-dialog';
 import { api, type ReviewRowDto, type SupplierRowDto } from '@/lib/client';
 import { formatCurrency, formatDateTime, formatNumber, formatRelative } from '@/lib/format';
@@ -52,6 +53,7 @@ function ReviewPageSkeleton() {
 }
 
 function ReviewPageInner() {
+  const { demo } = useDemoMode();
   const searchParams = useSearchParams();
   const initialSupplier = searchParams.get('supplier');
 
@@ -222,7 +224,13 @@ function ReviewPageInner() {
             <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
             Reload
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void bulkReclassify()} disabled={busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void bulkReclassify()}
+            disabled={busy || demo}
+            title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+          >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             Reclassify next 100
           </Button>
@@ -383,8 +391,12 @@ function ReviewPageInner() {
                     <Button
                       variant="outline"
                       onClick={() => void refreshSelected(detailSupplier.id)}
-                      disabled={busy}
-                      title="Re-enrich this supplier from the provider before correcting"
+                      disabled={busy || demo}
+                      title={
+                        demo
+                          ? 'Unavailable in the read-only demo — sign in to make changes'
+                          : 'Re-enrich this supplier from the provider before correcting'
+                      }
                     >
                       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       Re-enrich
@@ -443,11 +455,20 @@ function ReviewPageInner() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void saveCorrection(detailSupplier.id, detailSupplier.name)} disabled={code.length !== 8 || busy}>
+                  <Button
+                    onClick={() => void saveCorrection(detailSupplier.id, detailSupplier.name)}
+                    disabled={code.length !== 8 || busy || demo}
+                    title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+                  >
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     Save correction
                   </Button>
-                  <Button variant="outline" onClick={() => void clearCorrection(detailSupplier.id)} disabled={busy}>
+                  <Button
+                    variant="outline"
+                    onClick={() => void clearCorrection(detailSupplier.id)}
+                    disabled={busy || demo}
+                    title={demo ? 'Unavailable in the read-only demo — sign in to make changes' : undefined}
+                  >
                     <Undo2 className="h-4 w-4" />
                     Clear correction
                   </Button>

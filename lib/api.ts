@@ -5,7 +5,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { z } from 'zod';
 import { AppError, AuthError, ValidationError, serializeError } from '@/lib/errors';
-import { getEnv, workerSecrets } from '@/lib/env';
+import { getEnv, isDemoMode, workerSecrets } from '@/lib/env';
+import { resolveRequestRole } from '@/lib/auth';
+import { demoRespond } from '@/lib/demo/responses';
 import { parseReportFilters, reportFiltersSchema, type ReportFilters } from '@/lib/validation';
 
 /** Runtime for every API route in this app (Neon + postgres.js need Node). */
@@ -117,12 +119,26 @@ export function errorResponse(error: unknown): NextResponse {
   return NextResponse.json({ ok: false, error: serialized }, { status });
 }
 
-/** Wrap a handler so thrown errors become JSON responses. */
+/**
+ * Wrap a handler so thrown errors become JSON responses.
+ *
+ * This is also where the read-only demo is enforced, and that placement is the
+ * point. Every API route in the app goes through here, so a demo request is
+ * answered from `lib/demo/` *instead of* running the route's own handler: no query
+ * executes, no provider is called, and no mutation is possible. Adding an endpoint
+ * therefore cannot accidentally expose it to anonymous visitors — an unlisted path
+ * is refused rather than served.
+ *
+ * A signed-in caller is never diverted, so the same deployment serves both.
+ */
 export function jsonHandler<Args extends unknown[]>(
   handler: (request: NextRequest, ...args: Args) => Promise<NextResponse>,
 ): (request: NextRequest, ...args: Args) => Promise<NextResponse> {
   return async (request: NextRequest, ...args: Args) => {
     try {
+      if (isDemoMode() && (await resolveRequestRole(request)) === 'demo') {
+        return demoRespond(request);
+      }
       return await handler(request, ...args);
     } catch (error) {
       return errorResponse(error);

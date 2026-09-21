@@ -17,7 +17,7 @@
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { AuthError } from '@/lib/errors';
-import { dashboardSecret, isAuthDisabled } from '@/lib/env';
+import { dashboardSecret, isAuthDisabled, isDemoMode } from '@/lib/env';
 import { SESSION_COOKIE, timingSafeEqual, verifySessionToken } from '@/lib/session';
 
 /** Paths that never require a session. */
@@ -70,6 +70,32 @@ export async function authorizeRequest(request: {
   if (session.valid) return { authorized: true, via: 'session' };
 
   return { authorized: false, reason: 'invalid' };
+}
+
+/**
+ * What a request is allowed to be.
+ *
+ * `admin`  — a valid credential was presented, so serve the real application.
+ * `demo`   — no credential at all, on a deployment that opted into `DEMO_MODE`.
+ * `denied` — everything else, i.e. the normal locked-down case.
+ *
+ * The distinction between "no credential" and "a credential that failed" matters
+ * more than it looks. Only a request carrying *nothing* is a demo visitor. Someone
+ * whose session has expired or whose secret was rotated gets a 401 and the sign-in
+ * flow, because the alternative — quietly answering them from the demo fixture —
+ * would show a person fabricated suppliers and amounts at the exact moment they
+ * believe they are looking at their real deployment.
+ */
+export type RequestRole = 'admin' | 'demo' | 'denied';
+
+export async function resolveRequestRole(request: {
+  headers: { get(name: string): string | null };
+  cookies?: { get(name: string): { value: string } | undefined };
+}): Promise<RequestRole> {
+  const outcome = await authorizeRequest(request);
+  if (outcome.authorized) return 'admin';
+  if (outcome.reason === 'invalid') return 'denied';
+  return isDemoMode() ? 'demo' : 'denied';
 }
 
 /**

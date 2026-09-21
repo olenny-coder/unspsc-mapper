@@ -53,6 +53,8 @@ Drizzle ORM · Neon Postgres · CSV / PDF reporting.
 - [Architecture](#architecture)
 - [Quick start (5 minutes)](#quick-start-5-minutes)
 - [Environment variables](#environment-variables)
+- [Authentication](#authentication)
+- [Public read-only demo](#public-read-only-demo)
 - [Project layout](#project-layout)
 - [How the pipeline works](#how-the-pipeline-works)
 - [The live supplier sync](#the-live-supplier-sync)
@@ -372,10 +374,73 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 | `CRON_SECRET` | — | Secret for the worker's own `/run` endpoint (falls back to `WORKER_SECRET`). |
 | `NEXT_PUBLIC_APP_URL` | `http://localhost:3000` | Printed on report title pages. |
 | `APP_ACTOR` | `dashboard` | Default `actor` recorded in the audit log. |
+| `DEMO_MODE` | `false` | Serve the read-only demo to anonymous visitors. See [Public read-only demo](#public-read-only-demo). |
 | `ADMIN_EMAILS` | — | Reserved for multi-tenant deployments. |
 | `PORT` | `10000` | The worker's HTTP port on Render. |
 | `UNSPSC_SEED_CSV` | — | Path to an authoritative taxonomy CSV for `db:seed` (columns: `code,segment,family,class,commodity,description`). |
 | `UNSPSC_VERSION` | `v26.0801` | Stored on every seeded code. |
+
+---
+
+## Public read-only demo
+
+Set `DEMO_MODE=true` and anyone can browse the whole application without signing in — every page,
+with realistic sample data — but nothing they do changes anything and no real data is served.
+
+This exists so the app can be shown to a colleague, a reviewer or a prospect without handing over the
+dashboard secret, and without the risk of a stranger uploading a file or burning the Groq quota.
+
+### How the isolation actually works
+
+The enforcement is **structural**, not a per-route check that someone has to remember to add:
+
+* `jsonHandler` in `lib/api.ts` is the single wrapper every API route in the app goes through. When a
+  request is a demo request it is answered from `lib/demo/responses.ts` and the route's own handler
+  **never runs** — so no query executes and no provider is called. Adding a new endpoint therefore
+  cannot accidentally expose it: an unlisted path is refused, not inherited.
+* Non-GET verbs are refused before that lookup even happens, which is what makes the demo read-only
+  regardless of what any individual route decides.
+* The dataset in `lib/demo/dataset.ts` is pure static data with a single type-only import. There is
+  no database client, no fetch and no service in its dependency graph to reach for.
+* Only `/api/health` bypasses `jsonHandler` (it is a public path with its own handler), so it reduces
+  its real row counts to plain reachability for a demo visitor.
+
+The test suite enforces this rather than trusting it: `tests/demo.test.ts` mocks `getDb()` to **throw**,
+then exercises every demo read endpoint. If any demo path ever reaches the database, those tests fail
+instead of quietly leaking a row.
+
+### Who counts as a demo visitor
+
+Only a request carrying **no credential at all**.
+
+A failed or expired credential is *not* treated as a demo visitor — it gets the normal 401 and the
+sign-in flow. That distinction is deliberate: silently answering an expired session from the sample
+dataset would show fabricated suppliers and amounts to someone who believes they are looking at their
+real deployment, which is a worse outcome than an extra sign-in prompt.
+
+### What a visitor sees
+
+* A permanent amber banner: sample data, and that changes are disabled.
+* All seven pages fully populated — dashboard charts, hierarchy tree, review queue, audit trail,
+  reports, upload template, settings.
+* Mutating controls visibly disabled: upload, enrich, classify, sync, linking parents, saving
+  corrections, changing settings, generating or downloading reports.
+* "Sign in" in place of "Sign out" in the header, and an *Explore the demo* button on `/login`.
+
+If a disabled control is somehow reached anyway, the server answers `403` with
+`code: "demo_read_only"` and a message the UI displays.
+
+### Turning it on and off
+
+```bash
+DEMO_MODE="true"     # in .env.local, or the Vercel/Render environment
+```
+
+Nothing else is required — the dataset ships with the app. Set it back to `"false"` (the default) and
+the deployment is locked down exactly as before. Because the demo path never reads your database, you
+can leave it on after loading real suppliers: they simply are not served to anonymous visitors.
+
+Pair it with `ALLOW_INDEXING="true"` only if you actually want the demo indexed by search engines.
 
 ---
 
@@ -423,6 +488,9 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 │   ├── api.ts                      # route helpers, worker auth, error envelope
 │   ├── client.ts                   # typed browser API client
 │   ├── csv.ts                      # delimiter detection + parsing
+│   ├── demo/
+│   │   ├── dataset.ts              # bundled sample data for demo mode (pure data, no imports at runtime)
+│   │   └── responses.ts            # the only thing that answers an anonymous demo request
 │   ├── env.ts                      # validated environment
 │   ├── errors.ts                   # typed error hierarchy
 │   ├── format.ts                   # display formatting
@@ -430,6 +498,7 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 │   ├── rate-limit.ts               # token bucket + daily budget
 │   ├── retry.ts                    # backoff, Retry-After, mapLimit
 │   ├── unspsc-seed.ts              # taxonomy CSV → row mapping
+│   ├── upload-template.ts          # CSV template + accepted columns (shared by the route and the demo)
 │   ├── utils.ts                    # cn()
 │   ├── validation.ts               # Zod contracts with explicit interfaces
 │   └── vercel-origin.mjs           # build-time repair of Vercel origin vars (plain .mjs: next.config.mjs imports it)
@@ -463,7 +532,7 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 │   ├── suppliers.csv               # 120+ suppliers incl. parents & subsidiaries
 │   ├── transactions.csv            # transaction-level shape (amounts aggregated)
 │   └── unspsc-v26-en.csv.gz        # 149,849 UNSPSC v26 codes (3.8 MB gz)
-├── tests/                          # 272 Vitest tests
+├── tests/                          # 307 Vitest tests
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
 ├── Dockerfile.worker
@@ -983,6 +1052,7 @@ npx tsx scripts/smoke-offline.ts   # end-to-end pipeline check without a databas
 | `tests/theme.test.ts` | Theme resolution parity between the pre-paint boot script and the React provider, token sanity, script syntax |
 | `tests/env.test.ts` | **Environment policy**: an unusable tuning value falls back to its default without disturbing the rest of the configuration, `0` is rejected where the minimum is 1, `/api/health` can report what was ignored, and missing credentials still throw; scheme-less URLs; placeholder handling |
 | `tests/vercel-origin.test.ts` | The Vercel origin guard: bare host kept, full URL narrowed to its host, unusable value dropped, variables Next.js owns |
+| `tests/demo.test.ts` | **Demo isolation**: every read endpoint with `getDb()` mocked to throw, every mutating verb refused without invoking the handler, a valid credential still reaching the real handler, `DEMO_MODE=false` diverting nobody, unlisted paths refused, and fixture consistency (unique ids, resolvable parents, `DEMO:`-prefixed reasoning) |
 
 Nothing in the suite needs network access or a database: the hierarchy, merge, prompt, cron and
 reporting layers are pure functions, which is exactly why they are testable.
