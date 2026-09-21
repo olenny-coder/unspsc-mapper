@@ -180,6 +180,80 @@ describe('normalizeBrightDataPayload', () => {
   });
 });
 
+/**
+ * The documented LinkedIn Companies response, copied verbatim from Bright Data's
+ * docs. It is the one record shape that can be checked against a real example rather
+ * than imagined, and it caught two bugs that would have corrupted data silently.
+ */
+describe('normalizeBrightDataPayload against the documented LinkedIn company record', () => {
+  const LINKEDIN_COMPANY = {
+    name: 'Microsoft',
+    followers: 29034884,
+    employees_in_linkedin: 232354,
+    about:
+      "Every company has a mission. What's ours? To empower every person and every organization on Earth to achieve more.",
+    industries: 'Software Development',
+    company_size: '10,001+ employees',
+    headquarters: 'Redmond, Washington',
+    website: 'https://news.microsoft.com/',
+    id: 'microsoft',
+    country_code: 'US,AU,CA,FR,DE,JP,GB,DK,BE,FI,IT,KR,NL,NO,ES,SE,CH,BR,CN,IN,MX,RU,ZA,TR,AT,HK,IE,IL,NZ',
+    url: 'https://www.linkedin.com/company/microsoft',
+  };
+
+  it('maps the fields the app uses', () => {
+    const result = normalizeBrightDataPayload(LINKEDIN_COMPANY);
+
+    // The record's `website` is `https://news.microsoft.com/`; subdomains reduce to
+    // the registrable domain, which is what the rest of the app matches on.
+    expect(result.domain).toBe('microsoft.com');
+    expect(result.industry).toBe('Software Development');
+    expect(result.description).toContain('empower every person');
+    expect(result.country).toBe('US');
+  });
+
+  it('never stores the scraped directory as the company domain', () => {
+    // Without the directory guard this record yields `linkedin.com`, because `url` is
+    // the LinkedIn profile rather than the company's site. That would overwrite a real
+    // supplier domain, and every later classification would reason about LinkedIn.
+    const linkedinOnly = { ...LINKEDIN_COMPANY, website: undefined };
+
+    const result = normalizeBrightDataPayload(linkedinOnly);
+
+    expect(result.domain).not.toBe('linkedin.com');
+    expect(result.domain).toBeNull();
+  });
+
+  it('reduces the multi-country list to the primary country', () => {
+    // The raw value lists every country Microsoft operates in. Writing it verbatim
+    // would put forty codes in a country column.
+    const result = normalizeBrightDataPayload(LINKEDIN_COMPANY);
+    expect(result.country).toBe('US');
+    expect(result.country).not.toContain(',');
+  });
+
+  it('does not mistake a city, state, country string for a country', () => {
+    // Only an all-ISO-code list is collapsed. A place name must not become "Redmond".
+    const result = normalizeBrightDataPayload({ country: 'Redmond, Washington, United States' });
+    expect(result.country).toBeNull();
+  });
+
+  it('passes a plain country name through untouched', () => {
+    expect(normalizeBrightDataPayload({ country: 'United States' }).country).toBe('United States');
+  });
+
+  it('blocks every known directory host, not just LinkedIn', () => {
+    for (const host of ['crunchbase.com', 'owler.com', 'www.zoominfo.com', 'glassdoor.com']) {
+      expect(normalizeBrightDataPayload({ url: `https://${host}/company/acme` }).domain).toBeNull();
+    }
+  });
+
+  it('still accepts a normal company site that merely contains a blocked word', () => {
+    // Guard against an over-eager blocklist: `notlinkedin.com` is not LinkedIn.
+    expect(normalizeBrightDataPayload({ website: 'https://notlinkedin.com' }).domain).toBe('notlinkedin.com');
+  });
+});
+
 describe('callBrightData', () => {
   it('sends a single input with the dataset id, json format and the API key', async () => {
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse([{ industry: 'Software' }]));

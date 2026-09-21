@@ -440,7 +440,9 @@ function brightDataErrorRecord(record: Record<string, unknown>): string | null {
  *     through `progress` + `snapshot` so a slow lookup still returns data instead
  *     of silently degrading every affected supplier to the heuristic fallback.
  *
- * `format=json` is set explicitly: the endpoint defaults to `ndjson`.
+ * `format=json` is set explicitly rather than left to the default: Bright Data's
+ * OpenAPI description says the default is `ndjson` while their FAQ says `json`, so
+ * relying on it would be a coin flip between an array and newline-delimited records.
  */
 export async function callBrightData(
   input: { name: string; domain?: string | null },
@@ -605,13 +607,79 @@ function pickDeep(source: Record<string, unknown>, keys: readonly string[]): str
   return null;
 }
 
+/**
+ * Hosts that identify a directory, social profile or aggregator — never a company's
+ * own site.
+ *
+ * This matters because several datasets return the *source* page as `url`, so a
+ * LinkedIn company record's `url` is `https://www.linkedin.com/company/microsoft`.
+ * Storing that as the supplier's domain would overwrite a real domain with
+ * `linkedin.com`, and every subsequent re-classification would then be reasoning
+ * about LinkedIn. A blocked host yields null instead, so the supplier keeps whatever
+ * domain it already had.
+ */
+const BRIGHTDATA_DIRECTORY_HOSTS = [
+  'linkedin.com',
+  'crunchbase.com',
+  'owler.com',
+  'zoominfo.com',
+  'glassdoor.com',
+  'indeed.com',
+  'bloomberg.com',
+  'dnb.com',
+  'pitchbook.com',
+  'tracxn.com',
+  'apollo.io',
+  'facebook.com',
+  'twitter.com',
+  'x.com',
+  'instagram.com',
+  'youtube.com',
+  'wikipedia.org',
+  'g2.com',
+  'trustpilot.com',
+];
+
+/** A domain, unless it names the site the data was scraped from. */
+function brightDataCompanyDomain(value: string | null): string | null {
+  if (!value) return null;
+  const domain = extractDomain(value);
+  if (!domain) return null;
+
+  const host = domain.toLowerCase();
+  if (BRIGHTDATA_DIRECTORY_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`))) {
+    return null;
+  }
+  return domain;
+}
+
+/**
+ * Reduce a country field to a single country.
+ *
+ * Bright Data's LinkedIn companies dataset returns `country_code` as *every* country
+ * the company operates in — `"US,AU,CA,FR,DE,…"`, forty-odd entries for Microsoft.
+ * Writing that into a country column would be worse than writing nothing, so a list
+ * of ISO codes is reduced to its first entry, which is the primary country.
+ *
+ * Anything else containing a comma is left null rather than guessed at: a value like
+ * `"Redmond, Washington, United States"` is a place, and taking the first part would
+ * store "Redmond" as the country.
+ */
+function brightDataCountry(value: string | null): string | null {
+  if (!value) return null;
+  const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length <= 1) return value.trim();
+  const allIsoCodes = parts.every((part) => /^[A-Za-z]{2}$/.test(part));
+  return allIsoCodes ? parts[0] ?? null : null;
+}
+
 /** Normalise a Bright Data dataset record into the app's enrichment shape. */
 export function normalizeBrightDataPayload(raw: unknown): Omit<EnrichmentResult, 'fromCache' | 'creditsUsed' | 'provider'> {
   const record = asRecord(raw) ?? {};
   // Some datasets nest everything under `company` or `data`.
   const company = asRecord(record.company) ?? asRecord(record.data) ?? record;
 
-  const domain = extractDomain(
+  const domain = brightDataCompanyDomain(
     pickDeep(company, [
       'domain',
       'company_domain',
@@ -621,7 +689,7 @@ export function normalizeBrightDataPayload(raw: unknown): Omit<EnrichmentResult,
       'company_url',
       'linkedin_url',
       'about.website',
-    ]) ?? '',
+    ]),
   );
 
   const industry = pickDeep(company, [
@@ -655,15 +723,17 @@ export function normalizeBrightDataPayload(raw: unknown): Omit<EnrichmentResult,
     1200,
   );
 
-  const country = pickDeep(company, [
-    'country',
-    'country_name',
-    'country_code',
-    'hq_country',
-    'headquarters_country',
-    'location.country',
-    'about.country',
-  ]);
+  const country = brightDataCountry(
+    pickDeep(company, [
+      'country',
+      'country_name',
+      'country_code',
+      'hq_country',
+      'headquarters_country',
+      'location.country',
+      'about.country',
+    ]),
+  );
 
   // Ownership: a nested object, a plain string, or a sibling field.
   const parentRecord =

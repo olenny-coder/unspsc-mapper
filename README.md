@@ -687,10 +687,39 @@ shape of each record is defined by that dataset. Three consequences:
    A supplier with no domain cannot be enriched by a URL-keyed dataset. That is reported as
    `no_domain` on those rows rather than as a provider outage, so the affected suppliers are
    obvious in the run summary.
-3. **It is billed per record.** The Scraper API has trial credit, then costs from roughly
-   **$0.75 per 1,000 records**. Set `ENRICH_MONTHLY_CREDIT_LIMIT` to a number you actually mean —
-   the default of `500` is inherited from the free providers and is not a statement about your
-   budget.
+3. **It is billed per record.** One credit per delivered record, and **records that fail because the
+   input was wrong are still billed** — the request consumed resources. 5,000 credits are free every
+   month (see [the cost picture](#bright-data-and-the-free-tier-story)), which covers 5,000 records;
+   beyond that, pay-as-you-go is around **$1.50 per 1,000 records**. Set
+   `ENRICH_MONTHLY_CREDIT_LIMIT` to a number you actually mean — the default of `500` is inherited
+   from the other providers and is not a statement about your budget. Results are cached in Postgres,
+   so re-running enrichment costs nothing.
+
+### Where to get the dataset ID
+
+A dataset ID looks like `gd_l1viktl72bvl7bjuj0`. Two places to find it:
+
+- **The browser URL** when a scraper is open in the Control Panel — it contains `/cp/scrapers/gd_...`.
+- **The Code examples panel** on the scraper's *Configuration* tab, pre-filled in the generated cURL.
+
+Browse the available scrapers at <https://brightdata.com/cp/scrapers/browse>. Watch for the prefix:
+an id starting with **`sd_`** is a *snapshot* id — the data from one request — not a dataset id, and
+using it will fail.
+
+For company firmographics the useful one is the LinkedIn companies scraper:
+
+| Dataset | ID | Input URL |
+|---|---|---|
+| LinkedIn companies | `gd_l1vikfnt1wgvvqz95w` | `linkedin.com/company/{slug}` |
+
+**Be aware of a real limitation here.** A LinkedIn dataset wants a LinkedIn company URL, and the
+profile slug is *not* reliably derived from the domain — `hp.com` is `hewlett-packard`, `ibm.com` is
+`ibm`. So `ENRICH_INPUT_URL_TEMPLATE="https://www.linkedin.com/company/{slug}"` works for
+straightforward cases like `dell.com` → `dell`, and 404s for others. Those show up as `not_found`
+rather than as wrong data, but a dataset keyed on the company's *own* website avoids the problem
+entirely and works directly with the domains in your spend file. Check what input your chosen dataset
+expects before committing to it — the probe reports a 400 with Bright Data's own explanation if the
+shape is wrong.
 
 ### Configure it
 
@@ -734,12 +763,24 @@ whereas a wrong one would quietly produce wrong UNSPSC codes.
 
 ### Bright Data and the free-tier story
 
-Worth stating plainly, because the rest of this stack is free: Bright Data is not. Their "free tier"
-labels are trial credit, the Datasets and Company feeds start around **$250 per 100k records**, and
-the Company Search API is contact-sales. The Scraper API dataset path used here is the cheapest
-self-serve option and is still metered per record.
+The Scraper API fits the free-tier theme better than it first appears: **every Bright Data account gets
+5,000 free credits a month, no credit card required**, and the Scraper API charges **one credit per
+record**. That is 5,000 enriched suppliers a month at no cost, renewing on the first — more generous
+than the 500 credits CompanyEnrich and Context.dev give once.
 
-To evaluate the whole pipeline without spending anything, leave `ENRICH_PROVIDER=none` and use the
+Beyond that it is metered: around **$1.50 per 1,000 records** pay-as-you-go, or $1.30 on the Scale
+plan (rates as published in September 2026 — check your account). Two things to keep in mind:
+
+- **Failed records are still billed** when the input was wrong, so a misconfigured dataset can spend
+  credits producing nothing. Run `npm run brightdata:probe` first.
+- Other Bright Data products are a different story: the pre-collected **Datasets** and Company feeds
+  start around **$250 per 100k records**, and the **Company Search API** is contact-sales. The Scraper
+  API path used here is the cheapest self-serve option.
+
+With 5,000 free records a month, the honest guidance is: try it, and set
+`ENRICH_MONTHLY_CREDIT_LIMIT="5000"` so a runaway sync cannot exceed the free allowance.
+
+To evaluate the pipeline without touching Bright Data at all, leave `ENRICH_PROVIDER=none` and use the
 Groq free tier. Enrichment falls back to name-derived heuristics, and classification is largely
 unaffected because it works from the supplier name, industry and description.
 

@@ -155,6 +155,20 @@ and cannot be settled from docs: it calls the API once and prints the URL sent, 
 record key, the mapped result, and the fields that came back empty — writing nothing. That is the
 step to run before spending money on a batch.
 
+### Two bugs found by checking the mapping against a real record
+
+The LinkedIn Companies response is the one dataset shape Bright Data documents in full, so it was
+used as a real fixture rather than an imagined one. It exposed two defects that would have corrupted
+data silently in production:
+
+| Defect | What it would have done | Fix |
+|---|---|---|
+| `country_code` from that dataset is a **comma-separated list of every country the company operates in** — forty-odd ISO codes for Microsoft | Written verbatim into the `country` column, then truncated to 100 characters | A list of ISO codes is reduced to its first entry, which is the primary country. Anything else containing a comma is left `null`, so `"Redmond, Washington, United States"` cannot become `"Redmond"` |
+| The record's `url` is the **LinkedIn profile**, not the company's site | `extractDomain` would yield `linkedin.com` and overwrite the supplier's real domain, after which every re-classification would reason about LinkedIn | Directory and social hosts (LinkedIn, Crunchbase, Owler, ZoomInfo, Glassdoor, …) are rejected as a company domain, so the supplier keeps the domain it already had. A near-miss like `notlinkedin.com` is unaffected |
+
+Both are covered by tests using the documented record, including the `website`-absent case where the
+directory URL is the only candidate.
+
 ## SEO surfaces
 
 Verified against a production build (`next start`) with `ALLOW_INDEXING` at its default of false:
