@@ -1343,6 +1343,7 @@ environment variable degrades there too rather than stopping the scheduler.
 | Excel shows garbled characters | CSV opened without UTF-8 | The export includes a UTF-8 BOM; use Data → From Text/CSV in Excel if needed. |
 | `next lint` throws about `next.config.ts` | Next 14 requires `.mjs`/`.js` config | Already handled: the repo ships `next.config.mjs`. |
 | **CI is red within seconds and no jobs appear at all** | The workflow file was rejected when GitHub loaded it, not a job failing. The message says `Invalid workflow file ... #L1` and blames line 1 | A context is used where it is not available — almost always `secrets` inside a step-level `if`. See [If CI fails with "Invalid workflow file"](#if-ci-fails-with-invalid-workflow-file) |
+| A test passes locally but fails in CI on a formatted number, date or currency | Your local Node has a different ICU/CLDR build from CI's. `Intl` output is **not** stable across versions: `Intl.NumberFormat(…, { notation: 'compact' }).format(0)` is `$0.0` under Node 20's ICU 78.2 and `$0` under Node 24's ICU 77.1 | Don't pin `Intl` output in a test unless the runtime is pinned too. CI, Render and `.nvmrc` are all **Node 20** — run `nvm use` so local matches. `lib/format.ts` avoids `notation: 'compact'` for exactly this reason |
 
 ### If CI fails with "Invalid workflow file"
 

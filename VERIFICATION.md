@@ -13,6 +13,48 @@ seeded. Recorded here so a reviewer can reproduce each step.
 | `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
 
+## Node runtime divergence
+
+CI failed on a test that passed locally:
+
+```
+× formatCurrencyCompact > shortens amounts to an axis-sized label
+  → expected '$0.0' to be '$0'
+```
+
+Not a flaky test, and not a wrong expectation — `Intl`'s compact notation is **not stable across ICU
+builds**, and the two environments ship different ones:
+
+| Runtime | ICU | CLDR | `notation: 'compact'` for `0` |
+|---|---|---|---|
+| CI / Render / `render.yaml` (Node 20) | 78.2 | 48.0 | `$0.0` |
+| Local development (Node 24) | 77.1 | 47.0 | `$0` |
+
+Measured across both runtimes, four values disagreed — so that failure was one of several and the
+suite merely stopped at the first. It also means **production would have rendered different axis
+labels from local development**, which relaxing the assertion would have left in place.
+
+| Value | Node 20 compact | Node 24 compact | Now (computed) |
+|---|---|---|---|
+| `0` | `$0.0` | `$0` | `$0` |
+| `999` | `$999.0` | `$999` | `$999` |
+| `9_999` | `$10.0K` | `$10K` | `$10K` |
+| `999_999` | `$1,000K` | `$1,000K` | `$1M` |
+
+`formatCurrencyCompact` now computes the abbreviation itself and formats the scaled number with plain
+currency formatting, which is stable across ICU versions. The `999_999` row is a second defect the new
+test surfaced: the unit was chosen from the raw magnitude, so 999.999 rounded up into a four-digit
+`$1,000K` label. `UNIT_PROMOTION_SLACK` (0.9995) promotes anything that would round into the next unit.
+
+Verified on **both** runtimes, because local Node was the outlier here:
+
+| | Node 20.20.2 (CI) | Node 24.9.0 (local) |
+|---|---|---|
+| `tests/format.test.ts` | 9 passed | 9 passed |
+| Full suite | 17 files, **349 passed** | 17 files, **349 passed** |
+
+`.nvmrc` now pins Node 20 so a checkout matches CI and Render without anyone having to remember.
+
 ## CI workflow validity
 
 CI reported:
