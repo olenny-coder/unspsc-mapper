@@ -39,7 +39,7 @@ import {
   type DashboardFilterState,
 } from '@/components/filter-bar';
 import { api, type MetricsDto, type ParentRollupDto, type SupplierRowDto } from '@/lib/client';
-import { formatCurrency, formatDateTime, formatNumber, formatPercent, formatRelative, truncate } from '@/lib/format';
+import { formatCurrency, formatCurrencyCompact, formatDateTime, formatNumber, formatPercent, formatRelative, truncate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 const CHART_FALLBACK = {
@@ -207,8 +207,27 @@ export default function DashboardPage() {
   };
 
   const summary = metrics?.summary;
+
+  /*
+   * Category labels are budgeted to the axis width, not to a fixed length.
+   *
+   * Recharts renders axis text as SVG, which cannot wrap, so a label longer than the
+   * axis is simply clipped. A 22-character budget plus the 3-character segment-code
+   * prefix needs about 128px, but a phone only gives the axis 108px — which is what
+   * pushed the chart's content past its own container and clipped the labels. The
+   * budget is therefore derived from the axis width and font size it is drawn at.
+   */
+  const yAxisWidth = isNarrow ? 108 : 170;
+  const yAxisFontSize = isNarrow ? 10 : 11;
+  // 0.55em per character is a deliberately pessimistic estimate of average glyph
+  // width: font metrics differ per device and per platform font stack, and the cost
+  // of guessing low is a clipped label, whereas guessing high only costs a character.
+  const labelBudget = Math.max(8, Math.floor((yAxisWidth - 8) / (yAxisFontSize * 0.55)) - 3);
+
   const chartData = (metrics?.segments ?? []).slice(0, 10).map((segment) => ({
-    name: `${segment.segmentCode} ${truncate(segment.segment, 22)}`,
+    name: `${segment.segmentCode} ${truncate(segment.segment, labelBudget)}`,
+    // Kept in full so the tooltip can show what the axis had to shorten.
+    fullName: `${segment.segmentCode} ${segment.segment}`,
     spend: segment.spend,
     suppliers: segment.suppliers,
   }));
@@ -294,13 +313,28 @@ export default function DashboardPage() {
         <Alert variant="warning">
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle>Configuration incomplete</AlertTitle>
-          <AlertDescription>
-            {metrics.secrets.groqConfigured ? null : 'GROQ_API_KEY is missing, so classification is disabled. '}
-            {metrics.secrets.enrichConfigured
-              ? null
-              : 'No enrichment provider configured (ENRICH_PROVIDER/ENRICH_API_KEY), so suppliers are stored without web enrichment. '}
-            Set the values in your Vercel/Render environment variables or in <code>.env.local</code> for local
-            development.
+          {/*
+            One short sentence per problem rather than a single run-on line.
+
+            The previous wording embedded `ENRICH_PROVIDER/ENRICH_API_KEY` as one
+            31-character unbroken token, which cannot wrap, so on a narrow phone it
+            overflowed the alert's padding and ran into the border. Naming each
+            variable on its own keeps every token short enough to wrap, and reads far
+            better on a phone than one long sentence.
+          */}
+          <AlertDescription className="space-y-1.5">
+            {metrics.secrets.groqConfigured ? null : (
+              <p>
+                <code>GROQ_API_KEY</code> is missing, so classification is disabled.
+              </p>
+            )}
+            {metrics.secrets.enrichConfigured ? null : (
+              <p>No enrichment provider is configured, so suppliers are stored without web enrichment.</p>
+            )}
+            <p className="text-xs opacity-80">
+              Set these in your Vercel or Render environment variables, or in <code>.env.local</code> for local
+              development.
+            </p>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -378,19 +412,24 @@ export default function DashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={chartColors.grid} />
                   <XAxis
                     type="number"
-                    tickFormatter={(value: number) => formatCurrency(value)}
+                    tickFormatter={(value: number) => formatCurrencyCompact(value)}
                     fontSize={11}
                     stroke={chartColors.grid}
                   />
                   <YAxis
                     type="category"
                     dataKey="name"
-                    width={isNarrow ? 108 : 170}
-                    fontSize={isNarrow ? 10 : 11}
+                    width={yAxisWidth}
+                    fontSize={yAxisFontSize}
                     stroke={chartColors.grid}
                   />
                   <RechartsTooltip
                     formatter={(value: number) => formatCurrency(value)}
+                    // The axis shortens the segment name to fit; the tooltip shows it
+                    // in full, so truncation costs nothing.
+                    labelFormatter={(label: string, payload: Array<{ payload?: { fullName?: string } }>) =>
+                      payload?.[0]?.payload?.fullName ?? label
+                    }
                     labelStyle={{ fontSize: 12, color: 'hsl(var(--foreground))' }}
                     contentStyle={{
                       fontSize: 12,

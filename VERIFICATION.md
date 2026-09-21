@@ -9,7 +9,7 @@ seeded. Recorded here so a reviewer can reproduce each step.
 |---|---|
 | `npm run lint` (`next lint --max-warnings=0`) | ✔ No ESLint warnings or errors |
 | `npm run typecheck` (`tsc --noEmit`) | clean |
-| `npm test` (Vitest) | 16 files, **333 tests passed** |
+| `npm test` (Vitest) | 17 files, **345 tests passed** |
 | `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
 
@@ -168,6 +168,44 @@ data silently in production:
 
 Both are covered by tests using the documented record, including the `website`-absent case where the
 directory URL is the only candidate.
+
+## Mobile text overflow
+
+Reported from a real device: the dashboard's "Configuration incomplete" alert overran on a phone.
+The page itself did not scroll sideways, which is why the earlier overflow audit passed — the defect
+was an element overflowing *its own box*, which `documentElement.scrollWidth` cannot see.
+
+Measured with a CDP probe at a 320px layout viewport in demo mode (so the alert renders without a
+database), reporting every element whose `scrollWidth` exceeds its `clientWidth` and every element
+whose right edge passes the viewport:
+
+| Element | Before | After |
+|---|---|---|
+| Alert description | `scrollWidth 266` vs `clientWidth 262` — overflowing by 4px at the default font size, worse on a device with a larger text setting | not in the list |
+| Longest unbreakable token in the message | `(ENRICH_PROVIDER/ENRICH_API_KEY),` — 32 characters that cannot wrap | `enrichment.Set` |
+| Alert computed `overflow-wrap` | `normal` | `break-word` |
+| Chart (`recharts-responsive-container`) | `scrollWidth 275` vs `clientWidth 246` — overflowing by 29px, clipping the axis labels | not in the list |
+
+Both had the same root cause: a string longer than its box, in a context where it cannot wrap or is
+rendered as unbreakable text.
+
+- **The alert** embedded two env var names as one slash-joined token. `code` is monospace in this
+  theme, making it wider still. Fixed at both levels: the message now names each variable in its own
+  short sentence, and `alertVariants` gained `break-words min-w-0` so no alert added later can
+  reintroduce it.
+- **The chart** truncated its category labels to a fixed 22 characters. With the 3-character segment
+  prefix that needs roughly 128px, but a phone gives the axis 108px, so the labels were clipped and
+  pushed the chart's content past its container. The label budget is now derived from the axis width
+  and font size it is drawn at, and the axis tick amounts use a new `formatCurrencyCompact`
+  (`$60M` rather than `$60,000,000`) — an eleven-character tick label is centred on its tick, so the
+  last one spilled past the plot edge by half its width.
+
+The remaining entries the probe reports are intentional and were verified as such: `span.truncate`
+(the brand name, ellipsised by design), `div.table-scroll` (data tables scroll horizontally by
+design), and `span.sr-only` (visually hidden text, 1px wide by definition).
+
+Re-audited across all ten viewport and theme combinations afterwards: no horizontal overflow, WCAG AA
+contrast in both themes, and no control below the 24px minimum.
 
 ## SEO surfaces
 

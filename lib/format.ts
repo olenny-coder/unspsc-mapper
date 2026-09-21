@@ -15,6 +15,28 @@ export function formatCurrencyDetailed(value: number | null | undefined, currenc
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value);
 }
 
+/**
+ * Currency shortened to a compact axis label — `$1.2M` rather than `$1,200,000`.
+ *
+ * Exists for chart axes on narrow screens. A full amount is eleven characters
+ * (`$60,000,000`), and an axis tick label is centred on its tick, so the last one
+ * on the right spills past the plot edge by half its width. Compacting it removes
+ * the overflow at the source instead of padding the chart to hide it, and reads
+ * better in the 100px or so a phone has to offer.
+ *
+ * Falls back to `Intl` with `notation: 'compact'` so the currency symbol and its
+ * placement follow the locale rather than being hardcoded.
+ */
+export function formatCurrencyCompact(value: number | null | undefined, currency = 'USD'): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    notation: 'compact',
+    maximumFractionDigits: value < 10_000 ? 1 : 0,
+  }).format(value);
+}
+
 export function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
   return new Intl.NumberFormat('en-US').format(value);

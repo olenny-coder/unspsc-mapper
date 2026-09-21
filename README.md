@@ -535,7 +535,7 @@ Pair it with `ALLOW_INDEXING="true"` only if you actually want the demo indexed 
 │   ├── suppliers.csv               # 120+ suppliers incl. parents & subsidiaries
 │   ├── transactions.csv            # transaction-level shape (amounts aggregated)
 │   └── unspsc-v26-en.csv.gz        # 149,849 UNSPSC v26 codes (3.8 MB gz)
-├── tests/                          # 307 Vitest tests
+├── tests/                          # 345 Vitest tests
 ├── .github/workflows/ci.yml
 ├── docker-compose.yml
 ├── Dockerfile.worker

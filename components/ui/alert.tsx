@@ -9,9 +9,16 @@ import { cn } from '@/lib/utils';
  * semantic tokens — but they must stay legible on both surfaces. Each variant is
  * therefore declared twice: a light treatment and a `dark:` treatment using a
  * deep tinted background with a light foreground.
+ *
+ * `break-words` and `min-w-0` are load-bearing rather than cosmetic. Alert bodies
+ * routinely quote identifiers — environment variable names, API error messages,
+ * URLs — and a long unbroken token cannot wrap, so it overflows the box instead of
+ * moving to the next line. `break-words` lets it break; `min-w-0` stops a parent
+ * flex or grid container from being widened by the token's intrinsic width. Both
+ * are set here, once, so an alert added later cannot reintroduce the bug.
  */
 const alertVariants = cva(
-  'relative w-full rounded-lg border p-3 text-sm sm:p-4 [&>svg]:absolute [&>svg]:left-3 [&>svg]:top-3.5 [&>svg]:h-4 [&>svg]:w-4 sm:[&>svg]:left-4 sm:[&>svg]:top-4 [&>svg~*]:pl-7',
+  'relative w-full min-w-0 break-words rounded-lg border p-3 text-sm sm:p-4 [&>svg]:absolute [&>svg]:left-3 [&>svg]:top-3.5 [&>svg]:h-4 [&>svg]:w-4 sm:[&>svg]:left-4 sm:[&>svg]:top-4 [&>svg~*]:pl-7',
   {
     variants: {
       variant: {
