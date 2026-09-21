@@ -127,23 +127,32 @@ jobs:
   # Hook URL (Project Settings -> Git -> Deploy Hooks):
   #   VERCEL_DEPLOY_HOOK   (what this comment has always said)
   #   DEPLOY_HOOK_URL      (what the condition used to read)
-  # The two disagreed, so a project that followed the comment never triggered a
-  # deploy — and said nothing about it. Both are now accepted.
+  # If you followed the comment the deploy never triggered, and nothing said so.
   deploy:
     name: Trigger deploy hook
     needs: [quality, migrations]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      # `secrets` is NOT an allowed context in a step-level `if`. Using it there makes
+      # the whole file invalid — GitHub answers "Unrecognized named-value: 'secrets'"
+      # and blames line 1, so the run fails at validation and no job ever starts. That
+      # is what had been happening here.
+      #
+      # `jobs.<job_id>.env` DOES allow `secrets`, and `jobs.<job_id>.steps.if` DOES
+      # allow `env`, so the value is resolved once here and the step conditions read it
+      # from the env context. (Both rules are from GitHub's context-availability table.)
+      #
+      # Reading it from `env` also keeps the hook URL out of the generated script text.
+      DEPLOY_HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK != '' && secrets.VERCEL_DEPLOY_HOOK || secrets.DEPLOY_HOOK_URL }}
     steps:
       - name: Trigger Vercel deploy hook
-        if: ${{ secrets.VERCEL_DEPLOY_HOOK != '' || secrets.DEPLOY_HOOK_URL != '' }}
-        env:
-          DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK != '' && secrets.VERCEL_DEPLOY_HOOK || secrets.DEPLOY_HOOK_URL }}
+        if: ${{ env.DEPLOY_HOOK_URL != '' }}
         run: |
           echo "Triggering deploy hook…"
-          curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
+          curl --fail --silent --show-error -X POST "$DEPLOY_HOOK_URL"
           echo "Deploy hook accepted."
 
       - name: Skip notice
-        if: ${{ secrets.VERCEL_DEPLOY_HOOK == '' && secrets.DEPLOY_HOOK_URL == '' }}
+        if: ${{ env.DEPLOY_HOOK_URL == '' }}
         run: echo "Neither VERCEL_DEPLOY_HOOK nor DEPLOY_HOOK_URL is configured; skipping. Vercel deploys from GitHub automatically when connected."

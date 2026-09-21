@@ -41,6 +41,7 @@
     "db:generate": "drizzle-kit generate",
     "env:check": "tsx scripts/env-check.ts",
     "db:check": "tsx scripts/db-check.ts",
+    "workflow:check": "node scripts/check-workflows.mjs",
     "brightdata:probe": "tsx scripts/brightdata-probe.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:push": "drizzle-kit push",

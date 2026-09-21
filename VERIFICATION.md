@@ -13,6 +13,40 @@ seeded. Recorded here so a reviewer can reproduce each step.
 | `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
 
+## CI workflow validity
+
+CI reported:
+
+```
+Invalid workflow file: .github/workflows/ci.yml#L1
+(Line: 139, Col: 13): Unrecognized named-value: 'secrets'
+(Line: 148, Col: 13): Unrecognized named-value: 'secrets'
+```
+
+`secrets` is not an available context in `jobs.<job_id>.steps[*].if`, so GitHub rejected the **entire
+file** and the run failed before any job started. That is why nothing else in the workflow was ever
+reported and why every step in it was irrelevant to the failure.
+
+The defect predates the commit blamed for it: the original `if: ${{ secrets.DEPLOY_HOOK_URL != '' }}`
+was equally invalid, so this workflow had never loaded.
+
+| Rule, from GitHub's context-availability table | Consequence here |
+|---|---|
+| `jobs.<job_id>.steps.if` allows `env, github, inputs, job, matrix, needs, runner, steps, strategy, vars` | `secrets` unavailable → whole file rejected |
+| `jobs.<job_id>.env` allows `github, inputs, matrix, needs, secrets, strategy, vars` | resolve the secret once into job-level `env` |
+| `jobs.<job_id>.steps.if` allows `env` | gate the steps on `env.DEPLOY_HOOK_URL` |
+
+Verified with `actionlint` v1.7.12, which encodes the same rules GitHub applies:
+
+| Input | Result |
+|---|---|
+| The original shape — `secrets` in a step `if` | exit 1, two errors: *context "secrets" is not allowed here*, reproducing GitHub's message exactly |
+| The fixed workflow | exit 0, no problems |
+
+`npm run workflow:check` runs that validation locally. It has to be local because **a broken workflow
+cannot be caught by a job inside itself** — GitHub never loads it. Without `actionlint` installed the
+script prints install instructions and exits 0, so it is safe inside `check:all`.
+
 ## Deployment build resilience
 
 `next build` was run with `VERCEL=1 CI=1 NODE_ENV=production` against deliberately hostile

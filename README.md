@@ -1342,6 +1342,47 @@ environment variable degrades there too rather than stopping the scheduler.
 | Upload says "No usable rows found" | Missing/renamed name column | Check the header; accepted names are `name`, `supplier`, `supplier_name`, `vendor`, `company`. |
 | Excel shows garbled characters | CSV opened without UTF-8 | The export includes a UTF-8 BOM; use Data → From Text/CSV in Excel if needed. |
 | `next lint` throws about `next.config.ts` | Next 14 requires `.mjs`/`.js` config | Already handled: the repo ships `next.config.mjs`. |
+| **CI is red within seconds and no jobs appear at all** | The workflow file was rejected when GitHub loaded it, not a job failing. The message says `Invalid workflow file ... #L1` and blames line 1 | A context is used where it is not available — almost always `secrets` inside a step-level `if`. See [If CI fails with "Invalid workflow file"](#if-ci-fails-with-invalid-workflow-file) |
+
+### If CI fails with "Invalid workflow file"
+
+```
+Invalid workflow file: .github/workflows/ci.yml#L1
+(Line: 139, Col: 13): Unrecognized named-value: 'secrets'
+```
+
+GitHub **refuses to load the whole file** and blames line 1, so the run fails before a single job
+starts and nothing else in the file gets reported. The cause is a context used where it is not
+available — most often `secrets` inside a step-level `if`:
+
+| Key | Contexts allowed |
+|---|---|
+| `jobs.<job_id>.steps.if` | `env`, `github`, `inputs`, `job`, `matrix`, `needs`, `runner`, `steps`, `strategy`, `vars` — **no `secrets`** |
+| `jobs.<job_id>.env` | `github`, `inputs`, `matrix`, `needs`, **`secrets`**, `strategy`, `vars` |
+
+The fix is to resolve the secret once into a job-level `env`, then gate the steps on `env`:
+
+```yaml
+jobs:
+  deploy:
+    env:
+      DEPLOY_HOOK_URL: ${{ secrets.DEPLOY_HOOK_URL }}
+    steps:
+      - if: ${{ env.DEPLOY_HOOK_URL != '' }}
+        run: curl --fail -X POST "$DEPLOY_HOOK_URL"
+```
+
+Reading it from `env` also keeps the value out of the generated script text.
+
+**A broken workflow cannot be caught by a job inside itself**, because GitHub never loads it. That is
+why the check has to be local:
+
+```bash
+npm run workflow:check     # uses actionlint; a no-op with install instructions if absent
+```
+
+`actionlint` encodes GitHub's own context-availability rules and reports the same error GitHub does,
+so a clean result means the file will load.
 
 ---
 
