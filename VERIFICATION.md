@@ -9,7 +9,7 @@ seeded. Recorded here so a reviewer can reproduce each step.
 |---|---|
 | `npm run lint` (`next lint --max-warnings=0`) | ✔ No ESLint warnings or errors |
 | `npm run typecheck` (`tsc --noEmit`) | clean |
-| `npm test` (Vitest) | 15 files, **307 tests passed** |
+| `npm test` (Vitest) | 16 files, **333 tests passed** |
 | `npm run build` (`next build`) | compiled successfully; 18 dynamic API routes, 14 prerendered routes (7 pages + robots.txt, sitemap.xml, webmanifest), `ƒ Middleware 44 kB` |
 | `npx tsx scripts/smoke-offline.ts` | SMOKE TEST PASSED |
 
@@ -119,6 +119,41 @@ was stopped mid-verification. That turned out to be the strongest available test
 
 A complete dashboard was served **with no database reachable at all**, which is only possible because
 the demo path has no database dependency.
+
+## Bright Data provider
+
+Bright Data is a Scraper API *dataset* rather than a company-lookup API, which changes the shape of
+the integration: the request is keyed by `dataset_id`, the input is a URL rather than a name, and the
+record returned is defined by whichever dataset was chosen. The behaviour that follows is pinned by
+26 tests in `tests/brightdata.test.ts`; the parts that cannot be verified from documentation (the
+record's field names) are made observable instead of assumed.
+
+| Case | Verified behaviour |
+|---|---|
+| Request construction | `POST /datasets/v3/scrape` with `dataset_id`, **`format=json`** (the endpoint defaults to `ndjson`), `include_errors=true`, bearer auth, and one input carrying `url` + `supplier_name` |
+| Records returned | First record mapped, 1 credit charged |
+| Empty array | `not_found` with 0 credits — the API documents an empty array as "these inputs produced no records", so treating it as a successful empty enrichment would silently mark suppliers stale |
+| Record containing `error` / `error_code` | Reported as a failure rather than normalised into a company whose every field is null, which would look like a successful lookup that found nothing |
+| HTTP 400 | Surfaced verbatim as `invalid_input`; Bright Data names the offending field and reason, which is the fastest route to discovering a dataset wants a different input URL |
+| HTTP 401/403 | `unauthorized`, which the caller turns into a key error rather than a data error |
+| HTTP 202 | Followed through `GET /datasets/v3/progress/{id}` then `/datasets/v3/snapshot/{id}`. The synchronous endpoint has a **one-minute timeout** and answers 202 beyond it; without this path every slow lookup would silently degrade to the heuristic fallback |
+| Supplier without a domain | `no_domain`, and **no HTTP request is made** — asserted, not assumed |
+
+Field mapping (`normalizeBrightDataPayload`), verified against flat LinkedIn-style records, nested
+Crunchbase-style records, list-valued fields (`industries: [...]`), dot-paths (`about.description`),
+and a string-valued parent:
+
+| Property | Why it is asserted |
+|---|---|
+| An unrecognised record yields **nulls, never a guess** | A missing `industry` is visible and leaves the classifier working from the name; a wrong one produces wrong UNSPSC codes silently. This is the failure mode a new dataset would otherwise introduce |
+| The raw record is retained on the result | It is stored in the cache, so an unmapped field can be remapped from stored data without paying to re-fetch |
+| NAICS/SIC keep only digits | Matches how the rest of the app stores and matches them |
+| A non-object payload does not throw | A dataset configured wrongly must not take the worker down |
+
+`npm run brightdata:probe -- --domain dell.com` exists because the field names are dataset-specific
+and cannot be settled from docs: it calls the API once and prints the URL sent, the status, every
+record key, the mapped result, and the fields that came back empty — writing nothing. That is the
+step to run before spending money on a batch.
 
 ## SEO surfaces
 

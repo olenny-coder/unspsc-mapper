@@ -378,6 +378,357 @@ export async function callContextDev(
 }
 
 // ---------------------------------------------------------------------------
+// Bright Data (Scraper API dataset)
+// ---------------------------------------------------------------------------
+
+/** Bright Data's API root. Override with `ENRICH_BASE_URL` for a proxy or a test server. */
+export const BRIGHTDATA_DEFAULT_BASE_URL = 'https://api.brightdata.com';
+
+/**
+ * Turn a supplier into the URL a Bright Data dataset expects.
+ *
+ * `ENRICH_INPUT_URL_TEMPLATE` exists because a dataset's input is the URL *of the
+ * site it scrapes*, not the company's own website. A LinkedIn company dataset wants
+ * `https://www.linkedin.com/company/<slug>`, and handing it `https://dell.com` fails
+ * validation. Three placeholders are substituted:
+ *
+ *   `{domain}`  the host, without `www.`            → `dell.com`
+ *   `{slug}`    the registrable name, without a TLD → `dell`
+ *   `{name}`    the supplier name as written        → `Dell Technologies`
+ *
+ * `{slug}` is the one a LinkedIn-style dataset needs — `{domain}` there would
+ * produce `.../company/dell.com`, which is not a valid profile path.
+ */
+export function brightDataInputUrl(
+  input: { name: string; domain?: string | null },
+  template?: string | null,
+): string | null {
+  const host = (input.domain ?? '').replace(/^https?:\/\//i, '').replace(/\/+$/, '').replace(/^www\./i, '');
+  const slug = host.split('.')[0] ?? '';
+
+  const trimmedTemplate = template?.trim();
+  if (trimmedTemplate) {
+    const rendered = trimmedTemplate
+      .replace(/\{domain\}/g, host)
+      .replace(/\{slug\}/g, slug)
+      .replace(/\{name\}/g, input.name.trim())
+      .trim();
+    return rendered || null;
+  }
+
+  return host ? `https://${host}` : null;
+}
+
+/** A record Bright Data returns in place of data when a lookup failed. */
+function brightDataErrorRecord(record: Record<string, unknown>): string | null {
+  const code = pickString(record, ['error_code', 'errorCode']);
+  const message = pickString(record, ['error', 'error_message', 'warning']);
+  if (!code && !message) return null;
+  return [code, message].filter(Boolean).join(': ');
+}
+
+/**
+ * `POST /datasets/v3/scrape?dataset_id=...` — one company per call.
+ *
+ * Two behaviours of this endpoint shape the implementation:
+ *
+ *   - it answers **200 with a JSON array of records**, and an *empty array* means
+ *     the input produced nothing rather than an error, so an empty result is
+ *     reported as `not_found` rather than as success with no fields;
+ *   - it is subject to a **one-minute timeout**, after which it answers **202**
+ *     with a `snapshot_id` and continues asynchronously. That path is followed
+ *     through `progress` + `snapshot` so a slow lookup still returns data instead
+ *     of silently degrading every affected supplier to the heuristic fallback.
+ *
+ * `format=json` is set explicitly: the endpoint defaults to `ndjson`.
+ */
+export async function callBrightData(
+  input: { name: string; domain?: string | null },
+  options: { apiKey: string; datasetId: string; baseUrl?: string; timeoutMs?: number; urlTemplate?: string | null },
+): Promise<ProviderLookupResponse> {
+  const baseUrl = (options.baseUrl ?? BRIGHTDATA_DEFAULT_BASE_URL).replace(/\/$/, '');
+  const inputUrl = brightDataInputUrl(input, options.urlTemplate);
+
+  if (!inputUrl) {
+    // A URL-keyed dataset has nothing to work with. Reported as a distinct status so
+    // the caller can say "needs a domain" instead of blaming the provider.
+    return { ok: false, status: 422, data: null, error: 'no_domain', creditsUsed: 0 };
+  }
+
+  const headers = {
+    Authorization: `Bearer ${options.apiKey}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+    'User-Agent': 'unspsc-spend-categorizer/1.0',
+  };
+
+  /** Poll a timed-out job, then fetch its records. */
+  const collectSnapshot = async (snapshotId: string, retryAfterSeconds: number): Promise<ProviderLookupResponse> => {
+    const deadline = Date.now() + 90_000;
+    let waitMs = Math.max(retryAfterSeconds, 2) * 1000;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      const progress = await fetchWithTimeout(`${baseUrl}/datasets/v3/progress/${encodeURIComponent(snapshotId)}`, {
+        method: 'GET',
+        headers,
+        timeoutMs: 20_000,
+      });
+
+      if (!progress.ok) {
+        return { ok: false, status: progress.status, data: null, error: 'snapshot_progress_failed', creditsUsed: 0 };
+      }
+
+      const state = asRecord((await progress.json()) as unknown) ?? {};
+      if (pickString(state, ['status']) === 'ready') {
+        const snapshot = await fetchWithTimeout(
+          `${baseUrl}/datasets/v3/snapshot/${encodeURIComponent(snapshotId)}?format=json`,
+          { method: 'GET', headers, timeoutMs: 45_000 },
+        );
+        if (!snapshot.ok) {
+          return { ok: false, status: snapshot.status, data: null, error: 'snapshot_download_failed', creditsUsed: 0 };
+        }
+        const records = (await snapshot.json()) as unknown;
+        const first = Array.isArray(records) ? records[0] : unknownToRecord(records);
+        return first
+          ? { ok: true, status: 200, data: first, creditsUsed: 1 }
+          : { ok: false, status: 404, data: null, error: 'not_found', creditsUsed: 0 };
+      }
+      waitMs = 5_000;
+    }
+
+    return { ok: false, status: 504, data: null, error: 'snapshot_timeout', creditsUsed: 0 };
+  };
+
+  return retry(
+    async () => {
+      const url = new URL(`${baseUrl}/datasets/v3/scrape`);
+      url.searchParams.set('dataset_id', options.datasetId);
+      url.searchParams.set('format', 'json');
+      url.searchParams.set('include_errors', 'true');
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'POST',
+        headers,
+        // The API accepts a bare array; extra keys ride along and are echoed back
+        // on each record, which keeps results attributable when batching.
+        body: JSON.stringify([{ url: inputUrl, supplier_name: input.name }]),
+        timeoutMs: options.timeoutMs ?? 90_000,
+      });
+
+      if (response.status === 202) {
+        const body = asRecord((await response.json().catch(() => null)) as unknown) ?? {};
+        const snapshotId = pickString(body, ['snapshot_id']);
+        const retryAfter = Number(response.headers.get('retry-after') ?? '10');
+        if (!snapshotId) {
+          return { ok: false, status: 202, data: null, error: 'snapshot_id_missing', creditsUsed: 0 };
+        }
+        return collectSnapshot(snapshotId, Number.isFinite(retryAfter) ? retryAfter : 10);
+      }
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, status: response.status, data: null, error: 'unauthorized', creditsUsed: 0 };
+        }
+        if (response.status === 400) {
+          // Bright Data names the offending field and reason, which is the fastest
+          // way to discover that a dataset wants a different input URL shape.
+          return { ok: false, status: 400, data: null, error: `invalid_input: ${text.slice(0, 300)}`, creditsUsed: 0 };
+        }
+        if (!isRetryableStatus(response.status)) {
+          return { ok: false, status: response.status, data: null, error: text.slice(0, 300), creditsUsed: 0 };
+        }
+        throw new ProviderError('brightdata', `HTTP ${response.status}: ${text.slice(0, 200)}`, {
+          status: 503,
+          retryable: true,
+          details: { retryAfterMs: parseRetryAfterMs(response.headers.get('retry-after')) },
+        });
+      }
+
+      const body = (await response.json()) as unknown;
+      const records = Array.isArray(body) ? body : [body];
+      const first = records.map(unknownToRecord).find((record): record is Record<string, unknown> => record !== null);
+
+      // An empty array is the documented "these inputs produced no records" answer.
+      if (!first) return { ok: false, status: 404, data: null, error: 'not_found', creditsUsed: 0 };
+
+      const providerError = brightDataErrorRecord(first);
+      if (providerError) {
+        return { ok: false, status: 502, data: first, error: providerError, creditsUsed: 0 };
+      }
+
+      return { ok: true, status: 200, data: first, creditsUsed: 1 };
+    },
+    { attempts: 3, baseDelayMs: 1_000, maxDelayMs: 20_000, label: 'brightdata' },
+  );
+}
+
+/** Coerce a value to a plain object, or null. Local alias for readability below. */
+function unknownToRecord(value: unknown): Record<string, unknown> | null {
+  return asRecord(value);
+}
+
+/**
+ * Read a value from a Bright Data record, following dot-paths.
+ *
+ * Bright Data returns one flat JSON object per record whose keys are defined by the
+ * dataset, so the field names differ between (say) a LinkedIn dataset and a
+ * Crunchbase one. Rather than hardcode a single dataset's schema, each logical field
+ * accepts a list of known aliases and the first non-empty one wins. Anything that
+ * matches nothing yields null rather than a guess — a wrong `industry` is worse than
+ * a missing one, because a missing one is visible and a wrong one is not.
+ */
+function pickDeep(source: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    if (key.includes('.')) {
+      let cursor: unknown = source;
+      for (const segment of key.split('.')) {
+        cursor = asRecord(cursor)?.[segment];
+      }
+      const deep = typeof cursor === 'string' ? cursor.trim() : null;
+      if (deep) return deep;
+      continue;
+    }
+
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    // Some datasets return a list, e.g. `industries: ["Software", "IT Services"]`.
+    if (Array.isArray(value)) {
+      const items = value
+        .map((item) => (typeof item === 'string' ? item.trim() : pickString(asRecord(item) ?? {}, ['name', 'label', 'value'])))
+        .filter((item): item is string => Boolean(item));
+      if (items.length) return items.join(', ');
+    }
+  }
+  return null;
+}
+
+/** Normalise a Bright Data dataset record into the app's enrichment shape. */
+export function normalizeBrightDataPayload(raw: unknown): Omit<EnrichmentResult, 'fromCache' | 'creditsUsed' | 'provider'> {
+  const record = asRecord(raw) ?? {};
+  // Some datasets nest everything under `company` or `data`.
+  const company = asRecord(record.company) ?? asRecord(record.data) ?? record;
+
+  const domain = extractDomain(
+    pickDeep(company, [
+      'domain',
+      'company_domain',
+      'website',
+      'company_website',
+      'url',
+      'company_url',
+      'linkedin_url',
+      'about.website',
+    ]) ?? '',
+  );
+
+  const industry = pickDeep(company, [
+    'industry',
+    'industries',
+    'company_industry',
+    'sector',
+    'primary_industry',
+    'category',
+    'about.industry',
+  ]);
+
+  const naics =
+    pickDeep(company, ['naics', 'naics_code', 'naicsCode', 'primary_naics', 'naics_2022']) ??
+    pickDeep(asRecord(company.industry) ?? {}, ['naics', 'code']);
+
+  const sic = pickDeep(company, ['sic', 'sic_code', 'sicCode', 'primary_sic']);
+
+  const description = truncate(
+    pickDeep(company, [
+      'description',
+      'about',
+      'company_description',
+      'short_description',
+      'long_description',
+      'summary',
+      'overview',
+      'tagline',
+      'about.description',
+    ]),
+    1200,
+  );
+
+  const country = pickDeep(company, [
+    'country',
+    'country_name',
+    'country_code',
+    'hq_country',
+    'headquarters_country',
+    'location.country',
+    'about.country',
+  ]);
+
+  // Ownership: a nested object, a plain string, or a sibling field.
+  const parentRecord =
+    asRecord(company.parent) ?? asRecord(company.parent_company) ?? asRecord(company.ultimate_parent);
+  const parentValue = company.parent ?? company.parent_company ?? company.ultimate_parent;
+
+  const parentName =
+    pickDeep(company, ['parent_name', 'parent_company_name', 'ultimate_parent_name', 'hq_company']) ??
+    (typeof parentValue === 'string' ? parentValue.trim() || null : null) ??
+    (parentRecord ? pickDeep(parentRecord, ['name', 'company_name', 'legal_name']) : null);
+
+  const parentDomain =
+    pickDeep(company, ['parent_domain', 'parent_website']) ??
+    (parentRecord ? pickDeep(parentRecord, ['domain', 'website', 'url']) : null);
+
+  return {
+    domain,
+    industry: truncate(industry, 200),
+    naics: naics ? naics.replace(/\D/g, '').slice(0, 8) || null : null,
+    sic: sic ? sic.replace(/\D/g, '').slice(0, 6) || null : null,
+    description,
+    country: truncate(country, 100),
+    parentName: parentName ? parentName.trim() : null,
+    parentDomain: parentDomain ? extractDomain(parentDomain) : null,
+    raw: record,
+  };
+}
+
+/** Normalise a provider payload using the mapping for that provider. */
+export function normalizeProviderPayload(
+  provider: string,
+  raw: unknown,
+): Omit<EnrichmentResult, 'fromCache' | 'creditsUsed' | 'provider'> {
+  if (provider === 'contextdev') return normalizeContextDevPayload(raw);
+  if (provider === 'brightdata') return normalizeBrightDataPayload(raw);
+  return normalizeCompanyEnrichPayload(raw);
+}
+
+/** Call the configured provider. Kept in one place so the dispatch cannot drift. */
+async function callEnrichmentProvider(
+  provider: string,
+  input: { name: string; domain?: string | null },
+  env: ReturnType<typeof getEnv>,
+): Promise<ProviderLookupResponse> {
+  const apiKey = env.ENRICH_API_KEY ?? '';
+
+  if (provider === 'contextdev') {
+    return callContextDev(input, { apiKey, baseUrl: env.ENRICH_BASE_URL });
+  }
+
+  if (provider === 'brightdata') {
+    return callBrightData(input, {
+      apiKey,
+      // `isEnrichmentConfigured` treats a missing dataset id as unconfigured, so this
+      // is only reached when it is present.
+      datasetId: env.ENRICH_DATASET_ID ?? '',
+      baseUrl: env.ENRICH_BASE_URL,
+      urlTemplate: env.ENRICH_INPUT_URL_TEMPLATE,
+    });
+  }
+
+  return callCompanyEnrich(input, { apiKey, baseUrl: env.ENRICH_BASE_URL });
+}
+
+// ---------------------------------------------------------------------------
 // Cache
 // ---------------------------------------------------------------------------
 
@@ -474,7 +825,7 @@ export async function enrichOne(
     const cached = await readEnrichmentCache(provider, supplier.name, db);
     const payload = cached?.payload as Record<string, unknown> | null | undefined;
     if (cached && payload && typeof payload === 'object') {
-      const restored = normalizeCompanyEnrichPayload(payload);
+      const restored = normalizeProviderPayload(provider, payload);
       return {
         ...restored,
         raw: payload,
@@ -502,16 +853,11 @@ export async function enrichOne(
   }
 
   try {
-    const response =
-      env.ENRICH_PROVIDER === 'contextdev'
-        ? await callContextDev(
-            { name: supplier.name, domain: supplier.domain },
-            { apiKey: env.ENRICH_API_KEY!, baseUrl: env.ENRICH_BASE_URL },
-          )
-        : await callCompanyEnrich(
-            { name: supplier.name, domain: supplier.domain },
-            { apiKey: env.ENRICH_API_KEY!, baseUrl: env.ENRICH_BASE_URL },
-          );
+    const response = await callEnrichmentProvider(
+      env.ENRICH_PROVIDER,
+      { name: supplier.name, domain: supplier.domain },
+      env,
+    );
 
     if (!response.ok || !response.data) {
       if (response.status === 401 || response.status === 403) {
@@ -525,16 +871,16 @@ export async function enrichOne(
         ...heuristic,
         domain: supplier.domain ?? heuristic.domain,
         industry: supplier.industry ?? heuristic.industry,
+        naics: supplier.naics ?? heuristic.naics,
+        sic: supplier.sic ?? heuristic.sic,
         description: supplier.description ?? heuristic.description,
+        country: supplier.country ?? heuristic.country,
         provider,
         error: response.error ?? `no data (${response.status})`,
       };
     }
 
-    const normalized =
-      env.ENRICH_PROVIDER === 'contextdev'
-        ? normalizeContextDevPayload(response.data)
-        : normalizeCompanyEnrichPayload(response.data);
+    const normalized = normalizeProviderPayload(env.ENRICH_PROVIDER, response.data);
 
     await writeEnrichmentCache(
       {

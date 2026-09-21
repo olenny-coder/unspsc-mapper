@@ -41,6 +41,7 @@
     "db:generate": "drizzle-kit generate",
     "env:check": "tsx scripts/env-check.ts",
     "db:check": "tsx scripts/db-check.ts",
+    "brightdata:probe": "tsx scripts/brightdata-probe.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",

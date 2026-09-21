@@ -34,6 +34,9 @@ services:
         sync: false
       - key: ENRICH_API_KEY
         sync: false
+      # Only needed when ENRICH_PROVIDER is brightdata, which is keyed by dataset.
+      - key: ENRICH_DATASET_ID
+        sync: false
       - key: WORKER_SECRET
         sync: false
       - key: CRON_SECRET

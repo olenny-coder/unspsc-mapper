@@ -58,6 +58,7 @@ Drizzle ORM · Neon Postgres · CSV / PDF reporting.
 - [Project layout](#project-layout)
 - [How the pipeline works](#how-the-pipeline-works)
 - [The live supplier sync](#the-live-supplier-sync)
+- [Enrichment with Bright Data](#enrichment-with-bright-data)
 - [Reporting](#reporting)
 - [API reference](#api-reference)
 - [Free-tier budget management](#free-tier-budget-management)
@@ -351,9 +352,11 @@ npm run dev          # -> http://localhost:3000/login  (secret: local-dev-secret
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ENRICH_PROVIDER` | `companyenrich` | `companyenrich` \| `contextdev` \| `none`. `none` runs the pipeline offline with name-derived heuristics. |
-| `ENRICH_API_KEY` | — | 500 free credits on either provider. Results are cached in Postgres, so repeat runs cost 0 credits. |
+| `ENRICH_PROVIDER` | `companyenrich` | `companyenrich` \| `contextdev` \| `brightdata` \| `none`. `none` runs the pipeline offline with name-derived heuristics. |
+| `ENRICH_API_KEY` | — | 500 free credits on companyenrich/contextdev. Bright Data is paid per record. Results are cached in Postgres, so repeat runs cost 0 credits. |
 | `ENRICH_BASE_URL` | provider default | Override for a proxy or a self-hosted gateway. |
+| `ENRICH_DATASET_ID` | — | **Bright Data only**, and required with it: the Scraper API is keyed by dataset. See [Enrichment with Bright Data](#enrichment-with-bright-data). |
+| `ENRICH_INPUT_URL_TEMPLATE` | — | Bright Data only. Placeholders `{domain}` `{slug}` `{name}` for datasets whose input URL is not the company's own site. |
 | `ENRICH_MONTHLY_CREDIT_LIMIT` | `500` | Surfaced on `/api/health` and `/settings`. |
 | `ENRICH_CONCURRENCY` | `3` | Parallel enrichment lookups. |
 | `GROQ_MODEL_ACCURATE` | `llama-3.3-70b-versatile` | 1,000 req/day free. |
@@ -657,6 +660,91 @@ miss most runs. The worker instead:
 
 ---
 
+## Enrichment with Bright Data
+
+Bright Data works differently from CompanyEnrich and Context.dev, and the differences *are* the
+integration. It is a **Scraper API dataset**: you choose a dataset from their marketplace, and the
+shape of each record is defined by that dataset. Three consequences:
+
+1. **It needs a `dataset_id`.** There is no generic "look up this company" call. Find the id on the
+   dataset's page in the Bright Data Control Panel. Without it the app reports enrichment as *not
+   configured* and falls back to heuristics, rather than firing requests that cannot succeed.
+2. **Its input is a URL, not a company name.** By default the app sends `https://<domain>`. If your
+   dataset keys on a different site — a LinkedIn company dataset wants
+   `https://www.linkedin.com/company/dell` and rejects `https://dell.com` with a 400 — set
+   `ENRICH_INPUT_URL_TEMPLATE`:
+
+   ```
+   ENRICH_INPUT_URL_TEMPLATE="https://www.linkedin.com/company/{slug}"
+   ```
+
+   | Placeholder | Meaning | `dell.com` gives |
+   |---|---|---|
+   | `{domain}` | host, without `www.` | `dell.com` |
+   | `{slug}` | registrable name, without TLD | `dell` |
+   | `{name}` | supplier name as written | `Dell Technologies` |
+
+   A supplier with no domain cannot be enriched by a URL-keyed dataset. That is reported as
+   `no_domain` on those rows rather than as a provider outage, so the affected suppliers are
+   obvious in the run summary.
+3. **It is billed per record.** The Scraper API has trial credit, then costs from roughly
+   **$0.75 per 1,000 records**. Set `ENRICH_MONTHLY_CREDIT_LIMIT` to a number you actually mean —
+   the default of `500` is inherited from the free providers and is not a statement about your
+   budget.
+
+### Configure it
+
+```bash
+ENRICH_PROVIDER="brightdata"
+ENRICH_API_KEY="<your API key>"          # https://brightdata.com/cp/setting/users
+ENRICH_DATASET_ID="<dataset id>"         # from the dataset's page in the Control Panel
+ENRICH_MONTHLY_CREDIT_LIMIT="5000"       # set this deliberately
+```
+
+### Verify the field mapping before enriching a batch
+
+Every dataset defines its own record shape, so the mapping cannot be assumed from documentation. The
+probe makes it observable: it calls the API for one company and prints the URL sent, the HTTP status,
+every key the record contains, and which mapped fields came back empty.
+
+```bash
+npm run brightdata:probe -- --domain dell.com --name "Dell Technologies"
+npm run brightdata:probe -- --first 3        # three suppliers from the database
+```
+
+It writes nothing — no cache rows, no supplier updates. If a mapped field shows `— not found`, add
+that dataset's key name to the alias list in `normalizeBrightDataPayload`
+(`services/enrichment.ts`); the probe prints the key names to copy.
+
+A field that matches nothing stays `null` rather than being guessed, which is deliberate: a missing
+`industry` is visible on screen and simply leaves the classifier working from the supplier name,
+whereas a wrong one would quietly produce wrong UNSPSC codes.
+
+### How a lookup behaves
+
+| Situation | Result |
+|---|---|
+| Records returned | First record mapped; 1 credit; cached in Postgres, so re-runs cost 0 |
+| Empty array | `not_found` — the API's documented "these inputs produced no records" |
+| A record carrying `error`/`error_code` | Failure, **not** a company whose every field is null |
+| HTTP 400 | `invalid_input`, with Bright Data's own message naming the offending field |
+| HTTP 401/403 | Reported as a key problem, and the run stops rather than degrading quietly |
+| HTTP 202 | The job exceeded the one-minute synchronous limit; the app follows `progress` → `snapshot` and still returns the data |
+| Supplier has no domain | `no_domain`, and no API call is made |
+
+### Bright Data and the free-tier story
+
+Worth stating plainly, because the rest of this stack is free: Bright Data is not. Their "free tier"
+labels are trial credit, the Datasets and Company feeds start around **$250 per 100k records**, and
+the Company Search API is contact-sales. The Scraper API dataset path used here is the cheapest
+self-serve option and is still metered per record.
+
+To evaluate the whole pipeline without spending anything, leave `ENRICH_PROVIDER=none` and use the
+Groq free tier. Enrichment falls back to name-derived heuristics, and classification is largely
+unaffected because it works from the supplier name, industry and description.
+
+---
+
 ## Reporting
 
 `GET /api/export?format=csv|pdf&<filters>` streams the file. `format=rollup` and
@@ -871,6 +959,9 @@ curl https://api.groq.com/openai/v1/chat/completions \
 Sign up for CompanyEnrich or Context.dev (500 free credits), copy the key, and set
 `ENRICH_API_KEY` plus `ENRICH_PROVIDER`. Without it, set `ENRICH_PROVIDER=none`: the pipeline
 still works using name-derived heuristics and the LLM parent detector.
+
+Bright Data is also supported and gives the strongest firmographics, but it is **paid** and keyed by
+dataset — see [Enrichment with Bright Data](#enrichment-with-bright-data).
 
 ### Step 5 — Vercel (frontend + API)
 

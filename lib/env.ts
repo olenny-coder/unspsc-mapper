@@ -162,9 +162,37 @@ const envSchema = z.object({
   GROQ_MODEL_ACCURATE: z.string().default('llama-3.3-70b-versatile'),
   GROQ_MODEL_BULK: z.string().default('llama-3.1-8b-instant'),
 
-  ENRICH_PROVIDER: enumFromString<'companyenrich' | 'contextdev' | 'none'>(['companyenrich', 'contextdev', 'none'], 'companyenrich'),
+  ENRICH_PROVIDER: enumFromString<'companyenrich' | 'contextdev' | 'brightdata' | 'none'>(
+    ['companyenrich', 'contextdev', 'brightdata', 'none'],
+    'companyenrich',
+  ),
   ENRICH_API_KEY: optionalString,
   ENRICH_BASE_URL: optionalString,
+  /**
+   * Bright Data `dataset_id`, from the dataset's page in the Control Panel.
+   *
+   * Required when `ENRICH_PROVIDER=brightdata`: the Scraper API is keyed by dataset,
+   * so without an id every lookup would fail for a reason that looks like a provider
+   * outage. `isEnrichmentConfigured()` treats a missing id as "not configured", so the
+   * app falls back to the offline heuristic rather than firing doomed requests.
+   */
+  ENRICH_DATASET_ID: optionalString,
+  /**
+   * Optional URL template for the value sent to a Bright Data dataset.
+   *
+   * A dataset's input is the URL *of the site it scrapes*, not the supplier's own
+   * website: a LinkedIn company dataset wants `https://www.linkedin.com/company/...`,
+   * and handing it `https://dell.com` fails validation with a 400. Placeholders:
+   *
+   *   `{domain}` the host without `www.`            → `dell.com`
+   *   `{slug}`   the registrable name without a TLD → `dell`
+   *   `{name}`   the supplier name as written       → `Dell Technologies`
+   *
+   * So a LinkedIn-style dataset would use
+   * `https://www.linkedin.com/company/{slug}`. Unset, `https://<domain>` is sent,
+   * which suits datasets keyed on a company's own site.
+   */
+  ENRICH_INPUT_URL_TEMPLATE: optionalString,
   ENRICH_MONTHLY_CREDIT_LIMIT: intFromString(500, 0, 1_000_000),
   ENRICH_CONCURRENCY: intFromString(3, 1, 20),
 
@@ -403,7 +431,13 @@ export function isGroqConfigured(): boolean {
 
 export function isEnrichmentConfigured(): boolean {
   const env = getEnv();
-  return env.ENRICH_PROVIDER !== 'none' && Boolean(env.ENRICH_API_KEY);
+  if (env.ENRICH_PROVIDER === 'none') return false;
+  if (!env.ENRICH_API_KEY) return false;
+  // Bright Data is keyed by dataset; a key without a dataset id cannot enrich
+  // anything, so reporting it as configured would turn every supplier into a
+  // provider failure instead of a clean fall back to the heuristic.
+  if (env.ENRICH_PROVIDER === 'brightdata' && !env.ENRICH_DATASET_ID) return false;
+  return true;
 }
 
 /** Lazily require a credential, with an actionable message. */
