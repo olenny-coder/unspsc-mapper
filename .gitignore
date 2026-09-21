@@ -24,6 +24,16 @@ coverage/
 .env.test.local
 .env.production.local
 .env*.local
+# Backups and working copies of the above. `.env*.local` does NOT cover these — it
+# requires the name to *end* in `.local`, so `.env.local.bak` was untracked but
+# perfectly committable: one `git add -A` away from real secrets in the repository.
+.env*.bak
+.env*.backup
+.env*.old
+.env*.orig
+.env*.save
+.env.local*
+!.env.example
 
 # Logs
 logs/

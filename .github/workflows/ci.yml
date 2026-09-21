@@ -98,6 +98,10 @@ jobs:
 
       - name: Assert the schema is complete
         run: |
+          # `pipefail` matters here: without it a failing `psql` is masked by `tee`,
+          # and the step reports the confusing "missing table: suppliers" instead of
+          # the real connection error.
+          set -o pipefail
           PGPASSWORD=ci psql -h 127.0.0.1 -U ci -d unspsc -v ON_ERROR_STOP=1 -c "\dt" | tee /tmp/tables.txt
           for table in suppliers unspsc_codes classifications corrections enrichment_cache audit_log reports app_settings llm_usage; do
             grep -q "$table" /tmp/tables.txt || (echo "missing table: $table" && exit 1)
@@ -119,8 +123,12 @@ jobs:
           echo "seeded codes: $count"
           test "$count" -gt 1000 || (echo "expected more than 1000 seeded codes" && exit 1)
 
-  # Optional deploy trigger. Enable by setting the VERCEL_DEPLOY_HOOK secret to a
-  # Vercel Deploy Hook URL (Project Settings -> Git -> Deploy Hooks).
+  # Optional deploy trigger. Enable by setting EITHER secret name to a Vercel Deploy
+  # Hook URL (Project Settings -> Git -> Deploy Hooks):
+  #   VERCEL_DEPLOY_HOOK   (what this comment has always said)
+  #   DEPLOY_HOOK_URL      (what the condition used to read)
+  # The two disagreed, so a project that followed the comment never triggered a
+  # deploy — and said nothing about it. Both are now accepted.
   deploy:
     name: Trigger deploy hook
     needs: [quality, migrations]
@@ -128,12 +136,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Vercel deploy hook
-        if: ${{ secrets.DEPLOY_HOOK_URL != '' }}
+        if: ${{ secrets.VERCEL_DEPLOY_HOOK != '' || secrets.DEPLOY_HOOK_URL != '' }}
+        env:
+          DEPLOY_HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK != '' && secrets.VERCEL_DEPLOY_HOOK || secrets.DEPLOY_HOOK_URL }}
         run: |
           echo "Triggering deploy hook…"
-          curl --fail --silent --show-error -X POST "${{ secrets.DEPLOY_HOOK_URL }}"
+          curl --fail --silent --show-error -X POST "$DEPLOY_HOOK"
           echo "Deploy hook accepted."
 
       - name: Skip notice
-        if: ${{ secrets.DEPLOY_HOOK_URL == '' }}
-        run: echo "DEPLOY_HOOK_URL is not configured; skipping. Vercel deploys from GitHub automatically when connected."
+        if: ${{ secrets.VERCEL_DEPLOY_HOOK == '' && secrets.DEPLOY_HOOK_URL == '' }}
+        run: echo "Neither VERCEL_DEPLOY_HOOK nor DEPLOY_HOOK_URL is configured; skipping. Vercel deploys from GitHub automatically when connected."
